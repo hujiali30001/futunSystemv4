@@ -19,6 +19,13 @@ class SpotArbitrageTaskResult:
     execution_status: str | None = None
     filled_exchanges: list[str] | None = None
     failed_exchanges: list[str] | None = None
+    buy_leg_status: str | None = None
+    sell_leg_status: str | None = None
+    buy_leg_error_code: str | None = None
+    sell_leg_error_code: str | None = None
+    buy_leg_error_detail: str | None = None
+    sell_leg_error_detail: str | None = None
+    failed_stage: str | None = None
 
 
 class SpotArbitrageProbeService:
@@ -44,6 +51,15 @@ class SpotArbitrageProbeService:
         sell_exchange = ""
         buy_order = None
         sell_order = None
+        buy_final = None
+        sell_final = None
+        buy_leg_status = "not_started"
+        sell_leg_status = "not_started"
+        buy_leg_error_code = None
+        sell_leg_error_code = None
+        buy_leg_error_detail = None
+        sell_leg_error_detail = None
+        failed_stage = None
         try:
             for exchange in unique_exchanges:
                 session = self.session_factory.create_session(
@@ -107,18 +123,90 @@ class SpotArbitrageProbeService:
                 post_only=sell_exchange in {"okx", "gate", "gateio"},
             )
 
-            buy_order = await adapters[buy_exchange].create_order(buy_request)
-            filled_exchanges.append(buy_exchange)
-            sell_order = await adapters[sell_exchange].create_order(sell_request)
-            filled_exchanges.append(sell_exchange)
+            try:
+                buy_leg_status = "create_submitted"
+                buy_order = await adapters[buy_exchange].create_order(buy_request)
+                buy_leg_status = "created"
+                filled_exchanges.append(buy_exchange)
+            except Exception as exc:
+                buy_leg_status = "create_failed"
+                buy_leg_error_code = "buy_create_failed"
+                buy_leg_error_detail = str(exc)
+                failed_stage = "create_buy"
+                if buy_exchange and buy_exchange not in failed_exchanges:
+                    failed_exchanges.append(buy_exchange)
+                raise
+
+            try:
+                sell_leg_status = "create_submitted"
+                sell_order = await adapters[sell_exchange].create_order(sell_request)
+                sell_leg_status = "created"
+                filled_exchanges.append(sell_exchange)
+            except Exception as exc:
+                sell_leg_status = "create_failed"
+                sell_leg_error_code = "sell_create_failed"
+                sell_leg_error_detail = str(exc)
+                failed_stage = "create_sell"
+                if sell_exchange and sell_exchange not in failed_exchanges:
+                    failed_exchanges.append(sell_exchange)
+                raise
+
             await adapters[buy_exchange].fetch_order(buy_order["id"], symbol)
             await adapters[sell_exchange].fetch_order(sell_order["id"], symbol)
-            await adapters[buy_exchange].cancel_order(buy_order["id"], symbol)
-            await adapters[sell_exchange].cancel_order(sell_order["id"], symbol)
-            buy_final = await adapters[buy_exchange].fetch_order(buy_order["id"], symbol)
-            sell_final = await adapters[sell_exchange].fetch_order(
-                sell_order["id"], symbol
-            )
+
+            stage_exc = None
+
+            try:
+                buy_leg_status = "cancel_submitted"
+                await adapters[buy_exchange].cancel_order(buy_order["id"], symbol)
+                buy_leg_status = "cancelled"
+            except Exception as exc:
+                buy_leg_status = "cancel_failed"
+                buy_leg_error_code = "buy_cancel_failed"
+                buy_leg_error_detail = str(exc)
+                if failed_stage is None:
+                    failed_stage = "cancel_buy"
+                    stage_exc = exc
+
+            try:
+                sell_leg_status = "cancel_submitted"
+                await adapters[sell_exchange].cancel_order(sell_order["id"], symbol)
+                sell_leg_status = "cancelled"
+            except Exception as exc:
+                sell_leg_status = "cancel_failed"
+                sell_leg_error_code = "sell_cancel_failed"
+                sell_leg_error_detail = str(exc)
+                if failed_stage is None:
+                    failed_stage = "cancel_sell"
+                    stage_exc = exc
+
+            try:
+                buy_final = await adapters[buy_exchange].fetch_order(buy_order["id"], symbol)
+                buy_leg_status = "final_fetched"
+            except Exception as exc:
+                buy_leg_status = "final_fetch_failed"
+                buy_leg_error_code = "buy_final_fetch_failed"
+                buy_leg_error_detail = str(exc)
+                if failed_stage is None:
+                    failed_stage = "fetch_final_buy"
+                    stage_exc = exc
+
+            try:
+                sell_final = await adapters[sell_exchange].fetch_order(
+                    sell_order["id"], symbol
+                )
+                sell_leg_status = "final_fetched"
+            except Exception as exc:
+                sell_leg_status = "final_fetch_failed"
+                sell_leg_error_code = "sell_final_fetch_failed"
+                sell_leg_error_detail = str(exc)
+                if failed_stage is None:
+                    failed_stage = "fetch_final_sell"
+                    stage_exc = exc
+
+            if stage_exc is not None:
+                raise stage_exc
+
             return SpotArbitrageTaskResult(
                 ok=True,
                 symbol=symbol,
@@ -132,11 +220,22 @@ class SpotArbitrageProbeService:
                 execution_status="OPEN_HEDGED",
                 filled_exchanges=filled_exchanges,
                 failed_exchanges=[],
+                buy_leg_status=buy_leg_status,
+                sell_leg_status=sell_leg_status,
+                buy_leg_error_code=buy_leg_error_code,
+                sell_leg_error_code=sell_leg_error_code,
+                buy_leg_error_detail=buy_leg_error_detail,
+                sell_leg_error_detail=sell_leg_error_detail,
+                failed_stage=failed_stage,
             )
         except Exception as exc:
             if buy_exchange and buy_order is not None and buy_exchange not in filled_exchanges:
                 filled_exchanges.append(buy_exchange)
-            if sell_exchange and sell_order is None and sell_exchange not in failed_exchanges:
+            if (
+                sell_exchange
+                and sell_order is None
+                and sell_exchange not in failed_exchanges
+            ):
                 failed_exchanges.append(sell_exchange)
             return SpotArbitrageTaskResult(
                 ok=False,
@@ -145,12 +244,19 @@ class SpotArbitrageProbeService:
                 sell_exchange=sell_exchange,
                 buy_order_id=None if buy_order is None else buy_order.get("id"),
                 sell_order_id=None if sell_order is None else sell_order.get("id"),
-                buy_final_status=None,
-                sell_final_status=None,
+                buy_final_status=None if buy_final is None else buy_final.get("status"),
+                sell_final_status=None if sell_final is None else sell_final.get("status"),
                 message=str(exc),
-                execution_status="OPEN_PARTIAL" if filled_exchanges and failed_exchanges else None,
+                execution_status="OPEN_PARTIAL" if filled_exchanges else None,
                 filled_exchanges=filled_exchanges,
                 failed_exchanges=failed_exchanges,
+                buy_leg_status=buy_leg_status,
+                sell_leg_status=sell_leg_status,
+                buy_leg_error_code=buy_leg_error_code,
+                sell_leg_error_code=sell_leg_error_code,
+                buy_leg_error_detail=buy_leg_error_detail,
+                sell_leg_error_detail=sell_leg_error_detail,
+                failed_stage=failed_stage,
             )
         finally:
             await asyncio.gather(

@@ -90,6 +90,61 @@ class FakeFactory:
         )
 
 
+class CancelFailClient(FakeClient):
+    async def cancel_order(self, order_id, symbol):
+        raise RuntimeError("cancel order failed")
+
+
+class FinalFetchFailClient(FakeClient):
+    def __init__(self, exchange, bid, ask, fail_on_create=False):
+        super().__init__(exchange, bid, ask, fail_on_create=fail_on_create)
+        self.fetch_count = 0
+
+    async def fetch_order(self, order_id, symbol):
+        self.fetch_count += 1
+        if self.fetch_count >= 2:
+            raise RuntimeError("final fetch failed")
+        return await super().fetch_order(order_id, symbol)
+
+
+class CancelFailFactory(FakeFactory):
+    def create_session(self, exchange, env_mode, proxies, credentials):
+        config = self.client_configs[exchange]
+        client = CancelFailClient(
+            exchange,
+            config["bid"],
+            config["ask"],
+            fail_on_create=config["fail_on_create"],
+        )
+        self.created_clients[exchange].append(client)
+        self.create_session_calls.append(exchange)
+        return ExchangeAccountSession(
+            exchange=exchange,
+            env_mode=env_mode,
+            proxies=proxies,
+            client=client,
+        )
+
+
+class FinalFetchFailFactory(FakeFactory):
+    def create_session(self, exchange, env_mode, proxies, credentials):
+        config = self.client_configs[exchange]
+        client = FinalFetchFailClient(
+            exchange,
+            config["bid"],
+            config["ask"],
+            fail_on_create=config["fail_on_create"],
+        )
+        self.created_clients[exchange].append(client)
+        self.create_session_calls.append(exchange)
+        return ExchangeAccountSession(
+            exchange=exchange,
+            env_mode=env_mode,
+            proxies=proxies,
+            client=client,
+        )
+
+
 class ConcurrencySensitiveClient(FakeClient):
     active_calls = 0
 
@@ -175,6 +230,123 @@ class DelayedCloseFactory(FakeFactory):
             proxies=proxies,
             client=client,
         )
+
+
+@pytest.mark.asyncio
+async def test_spot_arbitrage_probe_records_leg_statuses_for_full_success():
+    service = SpotArbitrageProbeService(session_factory=FakeFactory())
+    credentials = {
+        "okx": ExchangeCredentials(api_key="a", secret="b", password="c"),
+        "bitget": ExchangeCredentials(api_key="a", secret="b", password="c"),
+        "gate": ExchangeCredentials(api_key="a", secret="b"),
+    }
+
+    result = await service.run_task(
+        exchanges=["okx", "bitget", "gate"],
+        credentials_by_exchange=credentials,
+        symbol="BTC/USDT",
+        env_mode="testnet",
+    )
+
+    assert result.execution_status == "OPEN_HEDGED"
+    assert getattr(result, "buy_leg_status", None) == "final_fetched"
+    assert getattr(result, "sell_leg_status", None) == "final_fetched"
+    assert getattr(result, "failed_stage", None) is None
+    assert getattr(result, "buy_leg_error_code", None) is None
+    assert getattr(result, "sell_leg_error_code", None) is None
+
+
+@pytest.mark.asyncio
+async def test_spot_arbitrage_probe_records_create_sell_failure_details():
+    factory = FakeFactory()
+    factory.client_configs["gate"]["fail_on_create"] = True
+    service = SpotArbitrageProbeService(session_factory=factory)
+    credentials = {
+        "okx": ExchangeCredentials(api_key="a", secret="b", password="c"),
+        "bitget": ExchangeCredentials(api_key="a", secret="b", password="c"),
+        "gate": ExchangeCredentials(api_key="a", secret="b"),
+    }
+
+    result = await service.run_task(
+        exchanges=["okx", "bitget", "gate"],
+        credentials_by_exchange=credentials,
+        symbol="BTC/USDT",
+        env_mode="testnet",
+    )
+
+    assert result.execution_status == "OPEN_PARTIAL"
+    assert getattr(result, "buy_leg_status", None) == "created"
+    assert getattr(result, "sell_leg_status", None) == "create_failed"
+    assert getattr(result, "failed_stage", None) == "create_sell"
+    assert getattr(result, "sell_leg_error_code", None) == "sell_create_failed"
+    assert "create order failed" in (getattr(result, "sell_leg_error_detail", None) or "")
+
+
+@pytest.mark.asyncio
+async def test_spot_arbitrage_probe_records_cancel_failure_details():
+    service = SpotArbitrageProbeService(session_factory=CancelFailFactory())
+    credentials = {
+        "okx": ExchangeCredentials(api_key="a", secret="b", password="c"),
+        "gate": ExchangeCredentials(api_key="a", secret="b"),
+    }
+
+    result = await service.run_task(
+        exchanges=["okx", "gate"],
+        credentials_by_exchange=credentials,
+        symbol="BTC/USDT",
+        env_mode="testnet",
+    )
+
+    assert result.execution_status == "OPEN_PARTIAL"
+    assert getattr(result, "failed_stage", None) in {"cancel_buy", "cancel_sell"}
+    assert getattr(result, "buy_leg_status", None) in {
+        "cancel_failed",
+        "cancelled",
+        "final_fetched",
+    }
+    assert getattr(result, "sell_leg_status", None) in {
+        "cancel_failed",
+        "cancelled",
+        "final_fetched",
+    }
+    assert {
+        getattr(result, "buy_leg_error_code", None),
+        getattr(result, "sell_leg_error_code", None),
+    } & {"buy_cancel_failed", "sell_cancel_failed"}
+
+
+@pytest.mark.asyncio
+async def test_spot_arbitrage_probe_records_final_fetch_failure_details():
+    service = SpotArbitrageProbeService(session_factory=FinalFetchFailFactory())
+    credentials = {
+        "okx": ExchangeCredentials(api_key="a", secret="b", password="c"),
+        "gate": ExchangeCredentials(api_key="a", secret="b"),
+    }
+
+    result = await service.run_task(
+        exchanges=["okx", "gate"],
+        credentials_by_exchange=credentials,
+        symbol="BTC/USDT",
+        env_mode="testnet",
+    )
+
+    assert result.execution_status == "OPEN_PARTIAL"
+    assert getattr(result, "failed_stage", None) in {
+        "fetch_final_buy",
+        "fetch_final_sell",
+    }
+    assert getattr(result, "buy_leg_status", None) in {
+        "final_fetch_failed",
+        "final_fetched",
+    }
+    assert getattr(result, "sell_leg_status", None) in {
+        "final_fetch_failed",
+        "final_fetched",
+    }
+    assert {
+        getattr(result, "buy_leg_error_code", None),
+        getattr(result, "sell_leg_error_code", None),
+    } & {"buy_final_fetch_failed", "sell_final_fetch_failed"}
 
 
 @pytest.mark.asyncio

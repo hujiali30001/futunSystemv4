@@ -3256,6 +3256,75 @@ async def test_executor_marks_execution_result_open_hedged():
 
 
 @pytest.mark.asyncio
+async def test_executor_marks_execution_result_open_hedged_with_rich_probe_fields():
+    redis_client = FakeRedis(
+        xread_messages=[
+            (
+                "stream:spot_exec_tasks:node-a",
+                [
+                    (
+                        "1-0",
+                        {
+                            "task_uuid": "task-1",
+                            "user_id": "42",
+                            "symbol": "BTC/USDT",
+                            "buy_exchange": "okx",
+                            "sell_exchange": "gate",
+                            "target_quote_amount": "40.0",
+                        },
+                    )
+                ],
+            )
+        ]
+    )
+    repository = FakeTaskRepository(task_uuid="task-1")
+    service = FakeSpotService()
+    service.result = type(
+        "ExecutionSummary",
+        (),
+        {
+            "ok": True,
+            "execution_status": "OPEN_HEDGED",
+            "filled_exchanges": ["okx", "gate"],
+            "failed_exchanges": [],
+            "buy_leg_status": "final_fetched",
+            "sell_leg_status": "final_fetched",
+            "buy_leg_error_code": None,
+            "sell_leg_error_code": None,
+            "failed_stage": None,
+        },
+    )()
+    consumer = RedisExecutionTaskConsumer(
+        redis_client=redis_client,
+        dispatcher=RedisOpportunityDispatcher(service),
+        stream_key="stream:spot_exec_tasks:node-a",
+        task_repository=repository,
+        block_ms=1,
+        region="node-a",
+    )
+
+    processed = await consumer.run(
+        credentials_by_exchange={"okx": object(), "gate": object()},
+        max_iterations=1,
+    )
+
+    assert processed == 1
+    assert repository.execution_results == [
+        (
+            "task-1",
+            {
+                "lifecycle_status": "SUCCEEDED",
+                "execution_status": "OPEN_HEDGED",
+                "filled_exchanges": ["okx", "gate"],
+                "failed_exchanges": [],
+                "repair_action": "NONE",
+                "repair_reason": "fully_hedged",
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
 async def test_executor_marks_execution_result_open_partial_with_repair_plan():
     redis_client = FakeRedis(
         xread_messages=[
@@ -3287,6 +3356,75 @@ async def test_executor_marks_execution_result_open_partial_with_repair_plan():
             "execution_status": "OPEN_PARTIAL",
             "filled_exchanges": ["okx"],
             "failed_exchanges": ["gate"],
+        },
+    )()
+    consumer = RedisExecutionTaskConsumer(
+        redis_client=redis_client,
+        dispatcher=RedisOpportunityDispatcher(service),
+        stream_key="stream:spot_exec_tasks:node-a",
+        task_repository=repository,
+        block_ms=1,
+        region="node-a",
+    )
+
+    processed = await consumer.run(
+        credentials_by_exchange={"okx": object(), "gate": object()},
+        max_iterations=1,
+    )
+
+    assert processed == 1
+    assert repository.execution_results == [
+        (
+            "task-1",
+            {
+                "lifecycle_status": "FAILED",
+                "execution_status": "OPEN_PARTIAL",
+                "filled_exchanges": ["okx"],
+                "failed_exchanges": ["gate"],
+                "repair_action": "AUTO_HEDGE_REPAIRING",
+                "repair_reason": "one_leg_failed",
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_executor_marks_execution_result_open_partial_with_rich_probe_fields():
+    redis_client = FakeRedis(
+        xread_messages=[
+            (
+                "stream:spot_exec_tasks:node-a",
+                [
+                    (
+                        "1-0",
+                        {
+                            "task_uuid": "task-1",
+                            "user_id": "42",
+                            "symbol": "BTC/USDT",
+                            "buy_exchange": "okx",
+                            "sell_exchange": "gate",
+                            "target_quote_amount": "40.0",
+                        },
+                    )
+                ],
+            )
+        ]
+    )
+    repository = FakeTaskRepository(task_uuid="task-1")
+    service = FakeSpotService()
+    service.result = type(
+        "ExecutionSummary",
+        (),
+        {
+            "ok": False,
+            "execution_status": "OPEN_PARTIAL",
+            "filled_exchanges": ["okx"],
+            "failed_exchanges": ["gate"],
+            "buy_leg_status": "created",
+            "sell_leg_status": "create_failed",
+            "buy_leg_error_code": None,
+            "sell_leg_error_code": "sell_create_failed",
+            "failed_stage": "create_sell",
         },
     )()
     consumer = RedisExecutionTaskConsumer(
