@@ -104,6 +104,58 @@ def _build_dispatch_user_event(
     )
 
 
+def _build_executor_execution_result_event(
+    *,
+    region: str,
+    payload: dict[str, object],
+    result: Any,
+) -> RuntimeEvent:
+    buy_exchange = (
+        str(payload["buy_exchange"]) if payload.get("buy_exchange") is not None else None
+    )
+    sell_exchange = (
+        str(payload["sell_exchange"]) if payload.get("sell_exchange") is not None else None
+    )
+    exchanges = [
+        exchange for exchange in (buy_exchange, sell_exchange) if exchange is not None
+    ]
+    return RuntimeEvent(
+        event_type="executor.execution_result",
+        level="INFO",
+        service="executor",
+        region=region,
+        symbol=str(payload["symbol"]) if payload.get("symbol") is not None else None,
+        exchange=buy_exchange,
+        exchanges=exchanges,
+        message="executor execution result",
+        payload={
+            "task_uuid": (
+                str(payload["task_uuid"]) if payload.get("task_uuid") is not None else None
+            ),
+            "user_id": (
+                str(payload["user_id"]) if payload.get("user_id") is not None else None
+            ),
+            "source_message_id": (
+                str(payload["source_message_id"])
+                if payload.get("source_message_id") is not None
+                else None
+            ),
+            "buy_exchange": buy_exchange,
+            "sell_exchange": sell_exchange,
+            "execution_status": getattr(result, "execution_status", None),
+            "filled_exchanges": list(getattr(result, "filled_exchanges", []) or []),
+            "failed_exchanges": list(getattr(result, "failed_exchanges", []) or []),
+            "buy_leg_status": getattr(result, "buy_leg_status", None),
+            "sell_leg_status": getattr(result, "sell_leg_status", None),
+            "buy_leg_error_code": getattr(result, "buy_leg_error_code", None),
+            "sell_leg_error_code": getattr(result, "sell_leg_error_code", None),
+            "buy_leg_error_detail": getattr(result, "buy_leg_error_detail", None),
+            "sell_leg_error_detail": getattr(result, "sell_leg_error_detail", None),
+            "failed_stage": getattr(result, "failed_stage", None),
+        },
+    )
+
+
 def _parse_market_type_scope(raw_value: Any) -> set[str]:
     if raw_value is None:
         return set()
@@ -752,11 +804,7 @@ class RedisExecutionTaskConsumer(RedisSpotConsumer):
                             proxies_by_exchange=proxies_by_exchange,
                         )
                         execution_status = getattr(result, "execution_status", None)
-                        if (
-                            task_uuid is not None
-                            and self.task_repository is not None
-                            and execution_status is not None
-                        ):
+                        if execution_status is not None:
                             filled_exchanges = list(
                                 getattr(result, "filled_exchanges", []) or []
                             )
@@ -775,15 +823,24 @@ class RedisExecutionTaskConsumer(RedisSpotConsumer):
                                 if execution_status == "OPEN_HEDGED"
                                 else "FAILED"
                             )
-                            self.task_repository.mark_execution_result(
-                                task_uuid,
-                                lifecycle_status=lifecycle_status,
-                                execution_status=execution_status,
-                                filled_exchanges=filled_exchanges,
-                                failed_exchanges=failed_exchanges,
-                                repair_action=repair_plan.action,
-                                repair_reason=repair_plan.reason,
-                            )
+                            if task_uuid is not None and self.task_repository is not None:
+                                self.task_repository.mark_execution_result(
+                                    task_uuid,
+                                    lifecycle_status=lifecycle_status,
+                                    execution_status=execution_status,
+                                    filled_exchanges=filled_exchanges,
+                                    failed_exchanges=failed_exchanges,
+                                    repair_action=repair_plan.action,
+                                    repair_reason=repair_plan.reason,
+                                )
+                            if self.event_router is not None:
+                                await self.event_router.dispatch(
+                                    _build_executor_execution_result_event(
+                                        region=self.region,
+                                        payload=effective_payload,
+                                        result=result,
+                                    )
+                                )
                             self.last_id = message_id
                             processed += 1
                             if lifecycle_status == "FAILED":

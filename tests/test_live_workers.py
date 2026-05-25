@@ -151,6 +151,10 @@ class FakeEventRouter:
         self.events.append(event)
 
 
+def _find_event(events, event_type: str):
+    return next(event for event in events if event.event_type == event_type)
+
+
 class FakeControlGuard:
     def __init__(self, *, allowed: bool, approved_notional: float, reason: str | None):
         self.decision = ControlDecision(
@@ -3455,6 +3459,326 @@ async def test_executor_marks_execution_result_open_partial_with_rich_probe_fiel
             },
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_executor_emits_execution_result_event_for_rich_open_hedged_result():
+    redis_client = FakeRedis(
+        xread_messages=[
+            (
+                "stream:spot_exec_tasks:node-a",
+                [
+                    (
+                        "1-0",
+                        {
+                            "task_uuid": "task-1",
+                            "user_id": "42",
+                            "symbol": "BTC/USDT",
+                            "buy_exchange": "okx",
+                            "sell_exchange": "gate",
+                            "target_quote_amount": "40.0",
+                            "source_message_id": "src-1",
+                        },
+                    )
+                ],
+            )
+        ]
+    )
+    repository = FakeTaskRepository(task_uuid="task-1")
+    service = FakeSpotService()
+    service.result = type(
+        "ExecutionSummary",
+        (),
+        {
+            "ok": True,
+            "execution_status": "OPEN_HEDGED",
+            "filled_exchanges": ["okx", "gate"],
+            "failed_exchanges": [],
+            "buy_leg_status": "final_fetched",
+            "sell_leg_status": "final_fetched",
+            "buy_leg_error_code": None,
+            "sell_leg_error_code": None,
+            "buy_leg_error_detail": None,
+            "sell_leg_error_detail": None,
+            "failed_stage": None,
+        },
+    )()
+    router = FakeEventRouter()
+    consumer = RedisExecutionTaskConsumer(
+        redis_client=redis_client,
+        dispatcher=RedisOpportunityDispatcher(service),
+        stream_key="stream:spot_exec_tasks:node-a",
+        task_repository=repository,
+        block_ms=1,
+        event_router=router,
+        region="node-a",
+    )
+
+    processed = await consumer.run(
+        credentials_by_exchange={"okx": object(), "gate": object()},
+        max_iterations=1,
+    )
+
+    assert processed == 1
+    event = _find_event(router.events, "executor.execution_result")
+    assert event.service == "executor"
+    assert event.region == "node-a"
+    assert event.symbol == "BTC/USDT"
+    assert event.exchange == "okx"
+    assert event.exchanges == ["okx", "gate"]
+    assert event.payload == {
+        "task_uuid": "task-1",
+        "user_id": "42",
+        "source_message_id": "src-1",
+        "buy_exchange": "okx",
+        "sell_exchange": "gate",
+        "execution_status": "OPEN_HEDGED",
+        "filled_exchanges": ["okx", "gate"],
+        "failed_exchanges": [],
+        "buy_leg_status": "final_fetched",
+        "sell_leg_status": "final_fetched",
+        "buy_leg_error_code": None,
+        "sell_leg_error_code": None,
+        "buy_leg_error_detail": None,
+        "sell_leg_error_detail": None,
+        "failed_stage": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_executor_emits_execution_result_event_for_rich_open_partial_result():
+    redis_client = FakeRedis(
+        xread_messages=[
+            (
+                "stream:spot_exec_tasks:node-a",
+                [
+                    (
+                        "1-0",
+                        {
+                            "task_uuid": "task-1",
+                            "user_id": "42",
+                            "symbol": "BTC/USDT",
+                            "buy_exchange": "okx",
+                            "sell_exchange": "gate",
+                            "target_quote_amount": "40.0",
+                            "source_message_id": "src-1",
+                        },
+                    )
+                ],
+            )
+        ]
+    )
+    repository = FakeTaskRepository(task_uuid="task-1")
+    service = FakeSpotService()
+    service.result = type(
+        "ExecutionSummary",
+        (),
+        {
+            "ok": False,
+            "execution_status": "OPEN_PARTIAL",
+            "filled_exchanges": ["okx"],
+            "failed_exchanges": ["gate"],
+            "buy_leg_status": "created",
+            "sell_leg_status": "create_failed",
+            "buy_leg_error_code": None,
+            "sell_leg_error_code": "sell_create_failed",
+            "buy_leg_error_detail": None,
+            "sell_leg_error_detail": "create order failed",
+            "failed_stage": "create_sell",
+        },
+    )()
+    router = FakeEventRouter()
+    consumer = RedisExecutionTaskConsumer(
+        redis_client=redis_client,
+        dispatcher=RedisOpportunityDispatcher(service),
+        stream_key="stream:spot_exec_tasks:node-a",
+        task_repository=repository,
+        block_ms=1,
+        event_router=router,
+        region="node-a",
+    )
+
+    processed = await consumer.run(
+        credentials_by_exchange={"okx": object(), "gate": object()},
+        max_iterations=1,
+    )
+
+    assert processed == 1
+    event = _find_event(router.events, "executor.execution_result")
+    assert event.payload["execution_status"] == "OPEN_PARTIAL"
+    assert event.payload["filled_exchanges"] == ["okx"]
+    assert event.payload["failed_exchanges"] == ["gate"]
+    assert event.payload["buy_leg_status"] == "created"
+    assert event.payload["sell_leg_status"] == "create_failed"
+    assert event.payload["sell_leg_error_code"] == "sell_create_failed"
+    assert event.payload["sell_leg_error_detail"] == "create order failed"
+    assert event.payload["failed_stage"] == "create_sell"
+
+
+@pytest.mark.asyncio
+async def test_executor_emits_execution_result_event_for_summary_only_result():
+    redis_client = FakeRedis(
+        xread_messages=[
+            (
+                "stream:spot_exec_tasks:node-a",
+                [
+                    (
+                        "1-0",
+                        {
+                            "task_uuid": "task-1",
+                            "user_id": "42",
+                            "symbol": "BTC/USDT",
+                            "buy_exchange": "okx",
+                            "sell_exchange": "gate",
+                            "target_quote_amount": "40.0",
+                        },
+                    )
+                ],
+            )
+        ]
+    )
+    repository = FakeTaskRepository(task_uuid="task-1")
+    service = FakeSpotService()
+    service.result = type(
+        "ExecutionSummary",
+        (),
+        {
+            "ok": True,
+            "execution_status": "OPEN_HEDGED",
+            "filled_exchanges": ["okx", "gate"],
+            "failed_exchanges": [],
+        },
+    )()
+    router = FakeEventRouter()
+    consumer = RedisExecutionTaskConsumer(
+        redis_client=redis_client,
+        dispatcher=RedisOpportunityDispatcher(service),
+        stream_key="stream:spot_exec_tasks:node-a",
+        task_repository=repository,
+        block_ms=1,
+        event_router=router,
+        region="node-a",
+    )
+
+    processed = await consumer.run(
+        credentials_by_exchange={"okx": object(), "gate": object()},
+        max_iterations=1,
+    )
+
+    assert processed == 1
+    event = _find_event(router.events, "executor.execution_result")
+    assert event.payload["execution_status"] == "OPEN_HEDGED"
+    assert event.payload["filled_exchanges"] == ["okx", "gate"]
+    assert event.payload["failed_exchanges"] == []
+    assert event.payload["buy_leg_status"] is None
+    assert event.payload["sell_leg_status"] is None
+    assert event.payload["buy_leg_error_code"] is None
+    assert event.payload["sell_leg_error_code"] is None
+    assert event.payload["failed_stage"] is None
+
+
+@pytest.mark.asyncio
+async def test_executor_emits_execution_result_event_without_task_repository():
+    redis_client = FakeRedis(
+        xread_messages=[
+            (
+                "stream:spot_exec_tasks:node-a",
+                [
+                    (
+                        "1-0",
+                        {
+                            "task_uuid": "task-1",
+                            "user_id": "42",
+                            "symbol": "BTC/USDT",
+                            "buy_exchange": "okx",
+                            "sell_exchange": "gate",
+                            "target_quote_amount": "40.0",
+                            "source_message_id": "src-1",
+                        },
+                    )
+                ],
+            )
+        ]
+    )
+    service = FakeSpotService()
+    service.result = type(
+        "ExecutionSummary",
+        (),
+        {
+            "ok": True,
+            "execution_status": "OPEN_HEDGED",
+            "filled_exchanges": ["okx", "gate"],
+            "failed_exchanges": [],
+        },
+    )()
+    router = FakeEventRouter()
+    consumer = RedisExecutionTaskConsumer(
+        redis_client=redis_client,
+        dispatcher=RedisOpportunityDispatcher(service),
+        stream_key="stream:spot_exec_tasks:node-a",
+        task_repository=None,
+        block_ms=1,
+        event_router=router,
+        region="node-a",
+    )
+
+    processed = await consumer.run(
+        credentials_by_exchange={"okx": object(), "gate": object()},
+        max_iterations=1,
+    )
+
+    assert processed == 1
+    event = _find_event(router.events, "executor.execution_result")
+    assert event.payload["task_uuid"] == "task-1"
+    assert event.payload["user_id"] == "42"
+    assert event.payload["source_message_id"] == "src-1"
+    assert event.payload["execution_status"] == "OPEN_HEDGED"
+    assert event.payload["filled_exchanges"] == ["okx", "gate"]
+    assert event.payload["failed_exchanges"] == []
+
+
+@pytest.mark.asyncio
+async def test_executor_preflight_failure_does_not_emit_execution_result_event():
+    redis_client = FakeRedis(
+        xread_messages=[
+            (
+                "stream:spot_exec_tasks:node-a",
+                [
+                    (
+                        "1-0",
+                        {
+                            "task_uuid": "task-1",
+                            "user_id": "42",
+                            "symbol": "BTC/USDT",
+                            "buy_exchange": "okx",
+                            "sell_exchange": "okx",
+                            "target_quote_amount": "40.0",
+                        },
+                    )
+                ],
+            )
+        ]
+    )
+    router = FakeEventRouter()
+    consumer = RedisExecutionTaskConsumer(
+        redis_client=redis_client,
+        dispatcher=RedisOpportunityDispatcher(FakeSpotService()),
+        stream_key="stream:spot_exec_tasks:node-a",
+        task_repository=FakeTaskRepository(task_uuid="task-1"),
+        block_ms=1,
+        event_router=router,
+        region="node-a",
+    )
+
+    processed = await consumer.run(
+        credentials_by_exchange={"okx": object()},
+        max_iterations=1,
+    )
+
+    assert processed == 0
+    assert all(
+        event.event_type != "executor.execution_result" for event in router.events
+    )
 
 
 @pytest.mark.asyncio
