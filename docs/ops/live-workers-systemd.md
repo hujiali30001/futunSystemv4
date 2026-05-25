@@ -532,6 +532,78 @@ summary。
   `execution_status`、`filled_exchanges_json`、`failed_exchanges_json`、`repair_action`、
   `repair_reason` 五个任务表字段，避免主机表结构落后导致验证假失败
 
+### Spot Probe Rich Result Validation
+
+`spot_arbitrage_probe` richer result 改造完成后，建议在主服务器直接用
+`SpotArbitrageProbeService + fake session factory` 复跑关键阶段，而不是触发真实交易所
+下单。这样可以在不扩大远端风险的前提下，验证 richer result 的字段语义是否与本地
+一致。
+
+建议至少覆盖四类场景：
+
+1. full success
+   - 两条腿都成功创建、撤单并完成最终查询
+   - 预期 `execution_status = OPEN_HEDGED`
+   - 预期 `buy_leg_status = final_fetched`
+   - 预期 `sell_leg_status = final_fetched`
+2. create sell failure
+   - 第二条腿下单失败
+   - 预期 `execution_status = OPEN_PARTIAL`
+   - 预期 `failed_stage = create_sell`
+   - 预期 `sell_leg_error_code = sell_create_failed`
+3. cancel failure
+   - 下单成功后撤单阶段失败
+   - 预期 `execution_status = OPEN_PARTIAL`
+   - 预期 `failed_stage` 落在 `cancel_buy / cancel_sell`
+   - 预期至少一边出现 `*_cancel_failed`
+4. final fetch failure
+   - 撤单后最终查询失败
+   - 预期 `execution_status = OPEN_PARTIAL`
+   - 预期 `failed_stage` 落在 `fetch_final_buy / fetch_final_sell`
+   - 预期至少一边出现 `*_final_fetch_failed`
+
+主服务器实测记录（2026-05-25）：
+
+- 远端 `full_success` 已通过：
+  - `buy_exchange = bitget`
+  - `sell_exchange = gate`
+  - `execution_status = OPEN_HEDGED`
+  - `filled_exchanges = ["bitget", "gate"]`
+  - `buy_leg_status = final_fetched`
+  - `sell_leg_status = final_fetched`
+  - `failed_stage = NULL`
+- 远端 `create_sell_failure` 已通过：
+  - `execution_status = OPEN_PARTIAL`
+  - `filled_exchanges = ["bitget"]`
+  - `failed_exchanges = ["gate"]`
+  - `buy_leg_status = created`
+  - `sell_leg_status = create_failed`
+  - `sell_leg_error_code = sell_create_failed`
+  - `failed_stage = create_sell`
+- 远端 `cancel_failure` 已通过：
+  - `execution_status = OPEN_PARTIAL`
+  - `filled_exchanges = ["okx", "gate"]`
+  - `buy_leg_error_code = buy_cancel_failed`
+  - `sell_leg_error_code = sell_cancel_failed`
+  - `failed_stage = cancel_buy`
+- 远端 `final_fetch_failure` 已通过：
+  - `execution_status = OPEN_PARTIAL`
+  - `filled_exchanges = ["okx", "gate"]`
+  - `buy_leg_status = final_fetch_failed`
+  - `sell_leg_status = final_fetch_failed`
+  - `buy_leg_error_code = buy_final_fetch_failed`
+  - `sell_leg_error_code = sell_final_fetch_failed`
+  - `failed_stage = fetch_final_buy`
+
+本次远端验证备注：
+
+- helper 路径为 `.tmp-ssh/spot_probe_rich_result_remote_helper.py`
+- 本地同步入口为 `.tmp-ssh/sync_and_validate_spot_probe_rich_result.py`
+- 这轮没有走 `RedisExecutionTaskConsumer` 或数据库写回，因为 richer result 本轮只增强
+  `SpotArbitrageProbeService` 的真实返回，不新增任务表持久化字段
+- 四个场景都在主服务器项目虚拟环境中通过，返回结果与本地测试预期一致
+- 整个验证过程只使用 fake client / fake factory，不会触发真实测试单
+
 ### Dispatcher DB Account Discovery Validation
 
 验证 `dispatcher` 已按数据库资格发现候选用户，且 `env_mode` 与显式
