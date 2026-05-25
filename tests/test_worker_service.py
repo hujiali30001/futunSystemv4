@@ -50,6 +50,7 @@ class FakeFactory:
         self.consumer_worker = FakeWorker()
         self.dispatcher_worker = FakeWorker()
         self.executor_worker = FakeWorker()
+        self.repair_worker = FakeWorker()
 
     def build_scanner_worker(self, **kwargs):
         if self.settings is None:
@@ -64,6 +65,9 @@ class FakeFactory:
 
     def build_executor_worker(self, **kwargs):
         return self.executor_worker
+
+    def build_repair_worker(self, **kwargs):
+        return self.repair_worker
 
 
 class FakeEventRouter:
@@ -359,6 +363,23 @@ async def test_default_worker_factory_builds_executor_worker_with_execution_summ
     assert worker.consumer.env_mode == settings.env_mode
 
 
+def test_build_repair_worker_uses_repair_execution_service():
+    factory = DefaultWorkerFactory(
+        settings=WorkerSettings(
+            worker_role="repair",
+            worker_region="node-a",
+            node_id="node-a",
+            spot_exchanges=["okx", "gate"],
+        ),
+        event_router=FakeEventRouter(),
+    )
+
+    worker = factory.build_repair_worker(redis_client=FakeRedis())
+
+    assert worker.consumer.repair_service is factory.repair_execution_service
+    assert worker.consumer.stream_key == "stream:repair_tasks:node-a"
+
+
 @pytest.mark.asyncio
 async def test_worker_app_syncs_user_node_routes_before_dispatcher_run(monkeypatch):
     seed_credentials(monkeypatch)
@@ -430,6 +451,28 @@ async def test_worker_app_dispatches_executor_role(monkeypatch):
     await app.run()
 
     assert factory.executor_worker.calls[0]["stream_key"] == "stream:spot_exec_tasks:node-a"
+
+
+@pytest.mark.asyncio
+async def test_worker_app_runs_repair_role(monkeypatch):
+    seed_credentials(monkeypatch)
+    redis_client = FakeRedis()
+    factory = FakeFactory()
+    app = WorkerApp(
+        settings=WorkerSettings(
+            worker_role="repair",
+            worker_region="node-a",
+            node_id="node-a",
+            spot_exchanges=["okx", "gate"],
+        ),
+        alert_settings=AlertSettings(alerts_enabled=True),
+        redis_factory=lambda _: redis_client,
+        worker_factory=factory,
+    )
+
+    await app.run()
+
+    assert len(factory.repair_worker.calls) == 1
 
 
 @pytest.mark.asyncio

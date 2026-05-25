@@ -145,6 +145,17 @@ class NodeExecutionTaskPublisher:
         )
 
 
+class RepairTaskPublisher:
+    def __init__(self, redis_client) -> None:
+        self.redis_client = redis_client
+
+    async def publish(self, *, node_id: str, task_payload: dict[str, str]) -> str:
+        return await self.redis_client.xadd(
+            f"stream:repair_tasks:{node_id}",
+            task_payload,
+        )
+
+
 def build_node_execution_task_payload(
     payload: dict,
     *,
@@ -166,6 +177,30 @@ def build_node_execution_task_payload(
     if sell_account_id is not None:
         task_payload["sell_account_id"] = sell_account_id
     return task_payload
+
+
+def build_repair_task_payload(
+    payload: dict[str, object],
+    *,
+    execution_status: str,
+    failed_exchanges: list[str],
+    repair_action: str,
+    repair_reason: str,
+    target_exchanges: list[str],
+) -> dict[str, str]:
+    return {
+        "task_uuid": str(payload["task_uuid"]),
+        "user_id": str(payload["user_id"]),
+        "symbol": str(payload["symbol"]),
+        "buy_exchange": str(payload["buy_exchange"]),
+        "sell_exchange": str(payload["sell_exchange"]),
+        "execution_status": execution_status,
+        "failed_exchanges": ",".join(failed_exchanges),
+        "repair_action": repair_action,
+        "repair_reason": repair_reason,
+        "target_exchanges": ",".join(target_exchanges),
+        "target_quote_amount": str(payload.get("target_quote_amount", "15.0")),
+    }
 
 
 class RedisOpportunityDispatcher:

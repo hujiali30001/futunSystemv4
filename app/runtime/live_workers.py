@@ -6,7 +6,10 @@ from uuid import uuid4
 from app.admin.control_plane import build_control_plane
 from app.admin.control_store import ControlPlaneStore
 from app.db.task_repository import ArbitrageTaskCreate
-from app.runtime.redis_flow import build_node_execution_task_payload
+from app.runtime.redis_flow import (
+    build_node_execution_task_payload,
+    build_repair_task_payload,
+)
 from app.runtime.runtime_events import RuntimeEvent
 from app.trading.executor import ExecutionResult
 from app.trading.risk_manager import RepairPlan, RiskManager
@@ -201,6 +204,56 @@ def _build_executor_repair_planned_event(
             "repair_action": repair_plan.action,
             "repair_reason": repair_plan.reason,
             "target_exchanges": list(failed_exchanges),
+        },
+    )
+
+
+def _build_repair_finished_event(
+    *,
+    region: str,
+    payload: dict[str, object],
+    result: Any,
+) -> RuntimeEvent:
+    buy_exchange = (
+        str(payload["buy_exchange"]) if payload.get("buy_exchange") is not None else None
+    )
+    sell_exchange = (
+        str(payload["sell_exchange"]) if payload.get("sell_exchange") is not None else None
+    )
+    exchanges = [
+        exchange for exchange in (buy_exchange, sell_exchange) if exchange is not None
+    ]
+    level = "INFO" if getattr(result, "ok", False) else "ERROR"
+    return RuntimeEvent(
+        event_type="repair.task.finished",
+        level=level,
+        service="repair",
+        region=region,
+        symbol=str(payload["symbol"]) if payload.get("symbol") is not None else None,
+        exchange=buy_exchange,
+        exchanges=exchanges,
+        message="repair task finished",
+        payload={
+            "task_uuid": (
+                str(payload["task_uuid"]) if payload.get("task_uuid") is not None else None
+            ),
+            "repair_action": (
+                str(payload.get("repair_action"))
+                if payload.get("repair_action") is not None
+                else None
+            ),
+            "repair_reason": (
+                str(payload.get("repair_reason"))
+                if payload.get("repair_reason") is not None
+                else None
+            ),
+            "target_exchanges": list(getattr(result, "target_exchanges", []) or []),
+            "repaired_exchanges": list(getattr(result, "repaired_exchanges", []) or []),
+            "remaining_failed_exchanges": list(
+                getattr(result, "remaining_failed_exchanges", []) or []
+            ),
+            "status": getattr(result, "status", None),
+            "reason": getattr(result, "reason", None),
         },
     )
 
@@ -672,6 +725,7 @@ class RedisExecutionTaskConsumer(RedisSpotConsumer):
         account_truth_resolver=None,
         preflight_validator=None,
         risk_manager=None,
+        repair_task_publisher=None,
         env_mode: str = "testnet",
         **kwargs,
     ) -> None:
@@ -682,6 +736,7 @@ class RedisExecutionTaskConsumer(RedisSpotConsumer):
         self.account_truth_resolver = account_truth_resolver
         self.preflight_validator = preflight_validator or ExecutorPreflightValidator()
         self.risk_manager = risk_manager or RiskManager()
+        self.repair_task_publisher = repair_task_publisher
         self.env_mode = env_mode
 
     def _resolve_execution_accounts(self, *, payload: dict) -> dict | None:
@@ -867,6 +922,24 @@ class RedisExecutionTaskConsumer(RedisSpotConsumer):
                                     failed_exchanges=failed_exchanges,
                                 )
                             )
+                            target_exchanges = list(failed_exchanges)
+                            if (
+                                self.repair_task_publisher is not None
+                                and execution_status == "OPEN_PARTIAL"
+                                and failed_exchanges
+                                and repair_plan.action != "NONE"
+                            ):
+                                await self.repair_task_publisher.publish(
+                                    node_id=self.region,
+                                    task_payload=build_repair_task_payload(
+                                        effective_payload,
+                                        execution_status=execution_status,
+                                        failed_exchanges=failed_exchanges,
+                                        repair_action=repair_plan.action,
+                                        repair_reason=repair_plan.reason,
+                                        target_exchanges=target_exchanges,
+                                    ),
+                                )
                             if (
                                 self.event_router is not None
                                 and execution_status == "OPEN_PARTIAL"
@@ -951,6 +1024,134 @@ class RedisExecutionTaskConsumer(RedisSpotConsumer):
                             self.task_repository.mark_failed(
                                 task_uuid,
                                 reason=failure_reason,
+                            )
+            iteration += 1
+        return processed
+
+
+class RedisRepairTaskConsumer(RedisSpotConsumer):
+    processed_event_type = "repair.task.processed"
+    processed_event_service = "repair"
+    processed_event_message = "repair task processed"
+    failed_event_type = "repair.task.failed"
+    failed_event_service = "repair"
+    failed_event_message = "repair task failed"
+
+    def __init__(
+        self,
+        *,
+        repair_service,
+        task_repository=None,
+        env_mode: str = "testnet",
+        **kwargs,
+    ) -> None:
+        super().__init__(dispatcher=repair_service, **kwargs)
+        self.repair_service = repair_service
+        self.task_repository = task_repository
+        self.env_mode = env_mode
+
+    async def run(
+        self,
+        *,
+        credentials_by_exchange: dict | None = None,
+        max_iterations: int | None = None,
+    ) -> int:
+        iteration = 0
+        processed = 0
+        while max_iterations is None or iteration < max_iterations:
+            entries = await self.redis_client.xread(
+                {self.stream_key: self.last_id},
+                count=1,
+                block=self.block_ms,
+            )
+            for _, messages in entries:
+                for message_id, payload in messages:
+                    try:
+                        target_exchanges = [
+                            item
+                            for item in str(payload.get("target_exchanges", "")).split(",")
+                            if item
+                        ]
+                        if (
+                            str(payload.get("repair_action", "")) != "AUTO_HEDGE_REPAIRING"
+                            or str(payload.get("execution_status", "")) != "OPEN_PARTIAL"
+                            or not target_exchanges
+                        ):
+                            self.last_id = message_id
+                            processed += 1
+                            continue
+                        result = await self.repair_service.run_task(
+                            task_uuid=str(payload["task_uuid"]),
+                            symbol=str(payload["symbol"]),
+                            buy_exchange=str(payload["buy_exchange"]),
+                            sell_exchange=str(payload["sell_exchange"]),
+                            target_exchanges=target_exchanges,
+                            credentials_by_exchange=credentials_by_exchange or {},
+                            target_quote_amount=float(
+                                payload.get("target_quote_amount", "15.0")
+                            ),
+                            env_mode=self.env_mode,
+                        )
+                        if self.task_repository is not None:
+                            if result.ok:
+                                self.task_repository.mark_repair_result(
+                                    str(payload["task_uuid"]),
+                                    lifecycle_status="SUCCEEDED",
+                                    execution_status="OPEN_HEDGED",
+                                    filled_exchanges=[
+                                        str(payload["buy_exchange"]),
+                                        str(payload["sell_exchange"]),
+                                    ],
+                                    failed_exchanges=[],
+                                    repair_action=str(payload["repair_action"]),
+                                    repair_reason="repair_succeeded",
+                                    status_reason=None,
+                                )
+                            else:
+                                remaining_failed_exchanges = list(
+                                    getattr(result, "remaining_failed_exchanges", []) or []
+                                )
+                                self.task_repository.mark_repair_result(
+                                    str(payload["task_uuid"]),
+                                    lifecycle_status="FAILED",
+                                    execution_status="OPEN_PARTIAL",
+                                    filled_exchanges=[
+                                        exchange
+                                        for exchange in (
+                                            str(payload["buy_exchange"]),
+                                            str(payload["sell_exchange"]),
+                                        )
+                                        if exchange not in remaining_failed_exchanges
+                                    ],
+                                    failed_exchanges=remaining_failed_exchanges,
+                                    repair_action=str(payload["repair_action"]),
+                                    repair_reason=str(payload["repair_reason"]),
+                                    status_reason="manual_required",
+                                )
+                        if self.event_router is not None:
+                            await self.event_router.dispatch(
+                                _build_repair_finished_event(
+                                    region=self.region,
+                                    payload=payload,
+                                    result=result,
+                                )
+                            )
+                            await self.event_router.dispatch(
+                                self._build_processed_event(
+                                    message_id=message_id,
+                                    payload=payload,
+                                )
+                            )
+                        self.last_id = message_id
+                        processed += 1
+                    except Exception as exc:
+                        if self.event_router is not None:
+                            await self.event_router.dispatch(
+                                self._build_failed_event(
+                                    message_id=message_id,
+                                    payload=payload,
+                                    error=exc,
+                                )
                             )
             iteration += 1
         return processed

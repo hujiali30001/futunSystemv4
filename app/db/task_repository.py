@@ -102,6 +102,31 @@ class TaskRepository:
         self.session.refresh(task)
         return task
 
+    def mark_repair_result(
+        self,
+        task_uuid: str,
+        *,
+        lifecycle_status: str,
+        execution_status: str,
+        filled_exchanges: list[str],
+        failed_exchanges: list[str],
+        repair_action: str,
+        repair_reason: str,
+        status_reason: str | None = None,
+    ) -> ArbitrageTask:
+        task = self._require_task(task_uuid)
+        task.status = lifecycle_status
+        task.status_reason = status_reason
+        task.execution_status = execution_status
+        task.filled_exchanges_json = list(filled_exchanges)
+        task.failed_exchanges_json = list(failed_exchanges)
+        task.repair_action = repair_action
+        task.repair_reason = repair_reason
+        task.finished_at = datetime.utcnow()
+        self.session.commit()
+        self.session.refresh(task)
+        return task
+
     def mark_blocked(self, task_uuid: str, *, reason: str) -> ArbitrageTask:
         task = self._require_task(task_uuid)
         task.status = "BLOCKED"

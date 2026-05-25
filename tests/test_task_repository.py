@@ -149,6 +149,52 @@ def test_task_repository_marks_execution_result_with_summary_fields():
     assert refreshed.finished_at is not None
 
 
+def test_mark_repair_result_marks_manual_required_summary():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = Session(engine)
+    session.add(User(id=42, username="u42"))
+    session.commit()
+
+    repository = TaskRepository(session)
+    task = repository.create_task(
+        ArbitrageTaskCreate(
+            task_uuid="task-1",
+            user_id=42,
+            strategy_config_id=None,
+            opportunity_id="opp-1",
+            env_mode="testnet",
+            task_type="open",
+            symbol="BTC/USDT",
+            spot_exchange="okx",
+            derivative_exchange="gate",
+            target_notional=100.0,
+            expected_spread_bps=120.0,
+            expected_funding_bps=0.0,
+            idempotency_key="idem-1",
+            home_region="main",
+        )
+    )
+
+    repository.mark_repair_result(
+        task.task_uuid,
+        lifecycle_status="FAILED",
+        execution_status="OPEN_PARTIAL",
+        filled_exchanges=["okx"],
+        failed_exchanges=["gate"],
+        repair_action="AUTO_HEDGE_REPAIRING",
+        repair_reason="one_leg_failed",
+        status_reason="manual_required",
+    )
+
+    refreshed = repository.get_by_task_uuid(task.task_uuid)
+
+    assert refreshed is not None
+    assert refreshed.status == "FAILED"
+    assert refreshed.status_reason == "manual_required"
+    assert refreshed.execution_status == "OPEN_PARTIAL"
+
+
 def test_task_repository_enforces_unique_idempotency_key():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)

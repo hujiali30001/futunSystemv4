@@ -25,9 +25,11 @@ from app.runtime.live_workers import (
     ControlPlaneLoader,
     ContinuousSpotScanner,
     RedisExecutionTaskConsumer,
+    RedisRepairTaskConsumer,
     RedisNodeTaskDispatcher,
     RedisSpotConsumer,
 )
+from app.runtime.repair_execution_service import RuntimeRepairExecutionService
 from app.runtime.redis_flow import (
     NodeExecutionTaskPublisher,
     RedisOpportunityDispatcher,
@@ -91,6 +93,9 @@ class DefaultWorkerFactory:
     spot_service: SpotArbitrageProbeService = field(default_factory=SpotArbitrageProbeService)
     trade_execution_service: RuntimeTradeExecutionService = field(
         default_factory=RuntimeTradeExecutionService
+    )
+    repair_execution_service: RuntimeRepairExecutionService = field(
+        default_factory=RuntimeRepairExecutionService
     )
 
     def build_scanner_worker(self, *, redis_client: Redis) -> ScannerWorker:
@@ -180,6 +185,24 @@ class DefaultWorkerFactory:
             account_repository=account_repository,
             account_truth_resolver=account_truth_resolver,
             risk_manager=RiskManager(),
+            env_mode=self.settings.env_mode,
+            block_ms=self.settings.consumer_block_ms,
+            event_router=self.event_router,
+            region=self.settings.worker_region,
+        )
+        return ConsumerWorker(consumer=consumer)
+
+    def build_repair_worker(self, *, redis_client: Redis) -> ConsumerWorker:
+        task_repository = None
+        if self.settings.database_enabled:
+            session_factory = build_session_factory(self.settings.database_url)
+            session = session_factory()
+            task_repository = TaskRepository(session)
+        consumer = RedisRepairTaskConsumer(
+            redis_client=redis_client,
+            repair_service=self.repair_execution_service,
+            stream_key=self.settings.resolved_repair_stream_key,
+            task_repository=task_repository,
             env_mode=self.settings.env_mode,
             block_ms=self.settings.consumer_block_ms,
             event_router=self.event_router,
@@ -304,6 +327,14 @@ class WorkerApp:
                 )
                 return
 
+            if self.settings.worker_role == "repair":
+                worker = factory.build_repair_worker(redis_client=redis_client)
+                await worker.run(
+                    credentials_by_exchange=credentials_by_exchange,
+                    stream_key=self.settings.resolved_repair_stream_key,
+                )
+                return
+
             worker = factory.build_consumer_worker(redis_client=redis_client)
             await worker.run(
                 credentials_by_exchange=credentials_by_exchange,
@@ -327,7 +358,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--role",
-        choices=["scanner", "consumer", "dispatcher", "executor"],
+        choices=["scanner", "consumer", "dispatcher", "executor", "repair"],
         default=None,
     )
     return parser.parse_args(argv)

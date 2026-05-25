@@ -26,7 +26,9 @@ class WorkerSettings(BaseSettings):
     target_quote_amount: float = 100.0
     scanner_poll_interval_seconds: float = 1.0
     consumer_block_ms: int = 1000
-    worker_role: Literal["scanner", "consumer", "dispatcher", "executor"] = "scanner"
+    worker_role: Literal[
+        "scanner", "consumer", "dispatcher", "executor", "repair"
+    ] = "scanner"
     worker_region: str = "default"
     database_enabled: bool = False
     database_url: str = "sqlite:///./furun.db"
@@ -35,6 +37,7 @@ class WorkerSettings(BaseSettings):
     user_node_routes: Annotated[dict[str, str], NoDecode] = Field(default_factory=dict)
     dispatch_source_stream: str = "stream:spot_opps"
     executor_stream_key: str | None = None
+    repair_stream_key: str | None = None
     route_admin_enabled: bool = False
     route_admin_bind_host: str = "127.0.0.1"
     route_admin_port: int = 8787
@@ -78,6 +81,10 @@ class WorkerSettings(BaseSettings):
     @property
     def resolved_executor_stream_key(self) -> str:
         return self.executor_stream_key or f"stream:spot_exec_tasks:{self.node_id}"
+
+    @property
+    def resolved_repair_stream_key(self) -> str:
+        return self.repair_stream_key or f"stream:repair_tasks:{self.node_id}"
 
 
 class AlertSettings(BaseSettings):
