@@ -1,0 +1,23 @@
+.git/
+.pytest_cache/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+
+# Local secrets and keys
+.keys/
+local-secrets/
+
+# Remote ops scratch space contains deploy keys and env files
+.tmp-ssh/
+
+# Local build artifacts
+deploy-package.zip
+*.zip
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
