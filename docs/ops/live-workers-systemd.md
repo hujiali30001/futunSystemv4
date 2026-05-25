@@ -467,6 +467,71 @@ sudo journalctl -u furun-spot-executor.service -n 120 --no-pager | grep 'executo
 - 清锁后再次执行三段 canary 验证，全部通过
 - 因此若后续主服务器再次出现“脚本卡在任务表第一写”的现象，优先排查 PostgreSQL 表锁，而不是先怀疑 binding 逻辑回归
 
+### Execution Result Summary Validation
+
+执行结果摘要改造完成后，`executor` 在拿到真实执行结果时，会把
+`execution_status`、成功交易所列表、失败交易所列表以及 repair 建议直接写回
+`arbitrage_tasks`；而 preflight 这类非真实执行失败路径，不应伪造 execution
+summary。
+
+建议在主服务器按分步 canary 方式验证三条路径：
+
+1. `OPEN_HEDGED`
+   - 构造一条已 `DISPATCHED` 的 canary 任务
+   - 向节点执行流写入对应 payload
+   - 用假 dispatcher 返回 `execution_status=OPEN_HEDGED`
+2. `OPEN_PARTIAL`
+   - 构造一条新的 canary 任务
+   - 用假 dispatcher 返回 `execution_status=OPEN_PARTIAL`
+   - 检查 `repair_action / repair_reason`
+3. preflight 失败
+   - 构造 `buy_exchange == sell_exchange` 的非法 payload
+   - 确认任务进入 `FAILED`
+   - 但 execution summary 字段保持 `NULL`
+
+主服务器实测记录（2026-05-25）：
+
+- 远端 `OPEN_HEDGED` 闭环已通过：
+  - 任务 `exec-summary-hedged-98389244`
+  - `status = SUCCEEDED`
+  - `execution_status = OPEN_HEDGED`
+  - `filled_exchanges_json = ["bitget", "gate"]`
+  - `failed_exchanges_json = []`
+  - `repair_action = NONE`
+  - `repair_reason = fully_hedged`
+  - `worker_node_id = main`
+- 远端 `OPEN_PARTIAL` 闭环已通过：
+  - 任务 `exec-summary-partial-1e6079c6`
+  - `status = FAILED`
+  - `status_reason = NULL`
+  - `execution_status = OPEN_PARTIAL`
+  - `filled_exchanges_json = ["bitget"]`
+  - `failed_exchanges_json = ["gate"]`
+  - `repair_action = AUTO_HEDGE_REPAIRING`
+  - `repair_reason = one_leg_failed`
+  - `worker_node_id = main`
+- 远端 preflight 失败路径已通过：
+  - 任务 `exec-summary-preflight-19dbcaf2`
+  - `processed = 0`
+  - `status = FAILED`
+  - `status_reason = executor_preflight_same_exchange`
+  - `execution_status = NULL`
+  - `filled_exchanges_json = NULL`
+  - `failed_exchanges_json = NULL`
+  - `repair_action = NULL`
+  - `repair_reason = NULL`
+  - 没有进入最终 dispatcher 调用
+
+本次远端验证备注：
+
+- 这轮验证刻意没有走真实交易所下单，而是在主服务器上直接拉起
+  `RedisExecutionTaskConsumer + TaskRepository + PostgreSQL`，并用假 dispatcher
+  返回 `OPEN_HEDGED / OPEN_PARTIAL`
+- 这样可以最短路径验证 execution summary 写回逻辑本身，而不把远端风险扩大到真实测试单
+- helper 执行前会先补
+  `execution_status`、`filled_exchanges_json`、`failed_exchanges_json`、`repair_action`、
+  `repair_reason` 五个任务表字段，避免主机表结构落后导致验证假失败
+
 ### Dispatcher DB Account Discovery Validation
 
 验证 `dispatcher` 已按数据库资格发现候选用户，且 `env_mode` 与显式
