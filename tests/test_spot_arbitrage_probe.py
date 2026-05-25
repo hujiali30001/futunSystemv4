@@ -203,6 +203,51 @@ async def test_spot_arbitrage_probe_selects_best_buy_and_sell_and_closes_orders(
 
 
 @pytest.mark.asyncio
+async def test_spot_arbitrage_probe_returns_open_hedged_summary_when_both_legs_finish():
+    service = SpotArbitrageProbeService(session_factory=FakeFactory())
+    credentials = {
+        "okx": ExchangeCredentials(api_key="a", secret="b", password="c"),
+        "bitget": ExchangeCredentials(api_key="a", secret="b", password="c"),
+        "gate": ExchangeCredentials(api_key="a", secret="b"),
+    }
+
+    result = await service.run_task(
+        exchanges=["okx", "bitget", "gate"],
+        credentials_by_exchange=credentials,
+        symbol="BTC/USDT",
+        env_mode="testnet",
+    )
+
+    assert result.execution_status == "OPEN_HEDGED"
+    assert result.filled_exchanges == ["bitget", "gate"]
+    assert result.failed_exchanges == []
+
+
+@pytest.mark.asyncio
+async def test_spot_arbitrage_probe_returns_open_partial_summary_when_second_leg_create_fails():
+    factory = FakeFactory()
+    factory.client_configs["gate"]["fail_on_create"] = True
+    service = SpotArbitrageProbeService(session_factory=factory)
+    credentials = {
+        "okx": ExchangeCredentials(api_key="a", secret="b", password="c"),
+        "bitget": ExchangeCredentials(api_key="a", secret="b", password="c"),
+        "gate": ExchangeCredentials(api_key="a", secret="b"),
+    }
+
+    result = await service.run_task(
+        exchanges=["okx", "bitget", "gate"],
+        credentials_by_exchange=credentials,
+        symbol="BTC/USDT",
+        env_mode="testnet",
+    )
+
+    assert result.ok is False
+    assert result.execution_status == "OPEN_PARTIAL"
+    assert result.filled_exchanges == ["bitget"]
+    assert result.failed_exchanges == ["gate"]
+
+
+@pytest.mark.asyncio
 async def test_spot_arbitrage_probe_closes_all_sessions_after_success():
     factory = FakeFactory()
     service = SpotArbitrageProbeService(session_factory=factory)

@@ -324,7 +324,7 @@ async def test_default_worker_factory_builds_executor_with_control_guard():
 
 
 @pytest.mark.asyncio
-async def test_default_worker_factory_builds_executor_worker_with_account_truth_dependencies():
+async def test_default_worker_factory_builds_executor_worker_with_execution_summary_dependencies():
     settings = WorkerSettings(
         worker_role="executor",
         database_enabled=True,
@@ -338,6 +338,7 @@ async def test_default_worker_factory_builds_executor_worker_with_account_truth_
 
     assert worker.consumer.account_repository is not None
     assert worker.consumer.account_truth_resolver is not None
+    assert worker.consumer.risk_manager is not None
     assert worker.consumer.env_mode == settings.env_mode
 
 

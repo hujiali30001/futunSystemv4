@@ -16,6 +16,9 @@ class SpotArbitrageTaskResult:
     buy_final_status: str | None
     sell_final_status: str | None
     message: str
+    execution_status: str | None = None
+    filled_exchanges: list[str] | None = None
+    failed_exchanges: list[str] | None = None
 
 
 class SpotArbitrageProbeService:
@@ -35,6 +38,12 @@ class SpotArbitrageProbeService:
         sessions = {}
         adapters = {}
         unique_exchanges = list(dict.fromkeys(exchanges))
+        filled_exchanges: list[str] = []
+        failed_exchanges: list[str] = []
+        buy_exchange = ""
+        sell_exchange = ""
+        buy_order = None
+        sell_order = None
         try:
             for exchange in unique_exchanges:
                 session = self.session_factory.create_session(
@@ -99,7 +108,9 @@ class SpotArbitrageProbeService:
             )
 
             buy_order = await adapters[buy_exchange].create_order(buy_request)
+            filled_exchanges.append(buy_exchange)
             sell_order = await adapters[sell_exchange].create_order(sell_request)
+            filled_exchanges.append(sell_exchange)
             await adapters[buy_exchange].fetch_order(buy_order["id"], symbol)
             await adapters[sell_exchange].fetch_order(sell_order["id"], symbol)
             await adapters[buy_exchange].cancel_order(buy_order["id"], symbol)
@@ -118,18 +129,28 @@ class SpotArbitrageProbeService:
                 buy_final_status=buy_final.get("status"),
                 sell_final_status=sell_final.get("status"),
                 message="spot_arbitrage_task_ok",
+                execution_status="OPEN_HEDGED",
+                filled_exchanges=filled_exchanges,
+                failed_exchanges=[],
             )
         except Exception as exc:
+            if buy_exchange and buy_order is not None and buy_exchange not in filled_exchanges:
+                filled_exchanges.append(buy_exchange)
+            if sell_exchange and sell_order is None and sell_exchange not in failed_exchanges:
+                failed_exchanges.append(sell_exchange)
             return SpotArbitrageTaskResult(
                 ok=False,
                 symbol=symbol,
-                buy_exchange="",
-                sell_exchange="",
-                buy_order_id=None,
-                sell_order_id=None,
+                buy_exchange=buy_exchange,
+                sell_exchange=sell_exchange,
+                buy_order_id=None if buy_order is None else buy_order.get("id"),
+                sell_order_id=None if sell_order is None else sell_order.get("id"),
                 buy_final_status=None,
                 sell_final_status=None,
                 message=str(exc),
+                execution_status="OPEN_PARTIAL" if filled_exchanges and failed_exchanges else None,
+                filled_exchanges=filled_exchanges,
+                failed_exchanges=failed_exchanges,
             )
         finally:
             await asyncio.gather(

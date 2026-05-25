@@ -1,6 +1,7 @@
 import pytest
 
-from app.trading.executor import TradeExecutor
+from app.trading.executor import ExecutionResult, TradeExecutor
+from app.trading.risk_manager import RiskManager
 from app.trading.tasks import ExecutionLeg, ExecutionTask
 
 
@@ -38,3 +39,17 @@ async def test_execute_open_submits_both_legs_and_reports_partial_failure():
     assert result.status == "OPEN_PARTIAL"
     assert result.filled_exchanges == ["binance"]
     assert result.failed_exchanges == ["okx"]
+
+
+def test_risk_manager_returns_none_plan_for_open_hedged():
+    manager = RiskManager()
+    result = ExecutionResult(
+        status="OPEN_HEDGED",
+        filled_exchanges=["okx", "gate"],
+        failed_exchanges=[],
+    )
+
+    plan = manager.build_repair_plan(result)
+
+    assert plan.action == "NONE"
+    assert plan.reason == "fully_hedged"

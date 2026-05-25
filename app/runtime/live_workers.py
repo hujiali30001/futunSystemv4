@@ -8,6 +8,8 @@ from app.admin.control_store import ControlPlaneStore
 from app.db.task_repository import ArbitrageTaskCreate
 from app.runtime.redis_flow import build_node_execution_task_payload
 from app.runtime.runtime_events import RuntimeEvent
+from app.trading.executor import ExecutionResult
+from app.trading.risk_manager import RiskManager
 
 
 @dataclass(slots=True)
@@ -568,6 +570,7 @@ class RedisExecutionTaskConsumer(RedisSpotConsumer):
         account_repository=None,
         account_truth_resolver=None,
         preflight_validator=None,
+        risk_manager=None,
         env_mode: str = "testnet",
         **kwargs,
     ) -> None:
@@ -577,6 +580,7 @@ class RedisExecutionTaskConsumer(RedisSpotConsumer):
         self.account_repository = account_repository
         self.account_truth_resolver = account_truth_resolver
         self.preflight_validator = preflight_validator or ExecutorPreflightValidator()
+        self.risk_manager = risk_manager or RiskManager()
         self.env_mode = env_mode
 
     def _resolve_execution_accounts(self, *, payload: dict) -> dict | None:
@@ -741,12 +745,65 @@ class RedisExecutionTaskConsumer(RedisSpotConsumer):
                                 "credentials_by_exchange is required when account truth resolution is unavailable"
                             )
 
-                        await self.dispatcher.dispatch(
+                        result = await self.dispatcher.dispatch(
                             effective_payload,
                             execution_accounts_by_exchange=execution_accounts_by_exchange,
                             credentials_by_exchange=dispatch_credentials_by_exchange,
                             proxies_by_exchange=proxies_by_exchange,
                         )
+                        execution_status = getattr(result, "execution_status", None)
+                        if (
+                            task_uuid is not None
+                            and self.task_repository is not None
+                            and execution_status is not None
+                        ):
+                            filled_exchanges = list(
+                                getattr(result, "filled_exchanges", []) or []
+                            )
+                            failed_exchanges = list(
+                                getattr(result, "failed_exchanges", []) or []
+                            )
+                            repair_plan = self.risk_manager.build_repair_plan(
+                                ExecutionResult(
+                                    status=execution_status,
+                                    filled_exchanges=filled_exchanges,
+                                    failed_exchanges=failed_exchanges,
+                                )
+                            )
+                            lifecycle_status = (
+                                "SUCCEEDED"
+                                if execution_status == "OPEN_HEDGED"
+                                else "FAILED"
+                            )
+                            self.task_repository.mark_execution_result(
+                                task_uuid,
+                                lifecycle_status=lifecycle_status,
+                                execution_status=execution_status,
+                                filled_exchanges=filled_exchanges,
+                                failed_exchanges=failed_exchanges,
+                                repair_action=repair_plan.action,
+                                repair_reason=repair_plan.reason,
+                            )
+                            self.last_id = message_id
+                            processed += 1
+                            if lifecycle_status == "FAILED":
+                                if self.event_router is not None:
+                                    await self.event_router.dispatch(
+                                        self._build_failed_event(
+                                            message_id=message_id,
+                                            payload=payload,
+                                            error=RuntimeError(execution_status),
+                                        )
+                                    )
+                                continue
+                            if self.event_router is not None:
+                                await self.event_router.dispatch(
+                                    self._build_processed_event(
+                                        message_id=message_id,
+                                        payload=effective_payload,
+                                    )
+                                )
+                            continue
                         if task_uuid is not None and self.task_repository is not None:
                             self.task_repository.mark_succeeded(task_uuid)
                         self.last_id = message_id

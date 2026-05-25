@@ -44,6 +44,7 @@ from app.runtime.worker_config import (
     load_exchange_credentials_from_env,
     load_exchange_proxies_from_env,
 )
+from app.trading.risk_manager import RiskManager
 
 
 class ScannerWorker:
@@ -174,6 +175,7 @@ class DefaultWorkerFactory:
             task_repository=task_repository,
             account_repository=account_repository,
             account_truth_resolver=account_truth_resolver,
+            risk_manager=RiskManager(),
             env_mode=self.settings.env_mode,
             block_ms=self.settings.consumer_block_ms,
             event_router=self.event_router,
