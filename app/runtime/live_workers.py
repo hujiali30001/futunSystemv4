@@ -279,6 +279,92 @@ def _select_bound_accounts(
     }
 
 
+class ExecutorPreflightError(RuntimeError):
+    def __init__(self, reason: str, detail: str) -> None:
+        super().__init__(detail)
+        self.reason = reason
+        self.detail = detail
+
+
+class ExecutorPreflightValidator:
+    required_fields = (
+        "task_uuid",
+        "user_id",
+        "symbol",
+        "buy_exchange",
+        "sell_exchange",
+    )
+
+    def validate(
+        self,
+        *,
+        payload: dict[str, Any],
+        execution_accounts_by_exchange: dict[str, Any] | None,
+    ) -> None:
+        for field in self.required_fields:
+            raw_value = payload.get(field)
+            if raw_value is None or str(raw_value).strip() == "":
+                raise ExecutorPreflightError(
+                    "executor_preflight_invalid_payload",
+                    f"missing required field: {field}",
+                )
+
+        buy_exchange = str(payload["buy_exchange"])
+        sell_exchange = str(payload["sell_exchange"])
+        if buy_exchange == sell_exchange:
+            raise ExecutorPreflightError(
+                "executor_preflight_same_exchange",
+                "buy_exchange and sell_exchange must differ",
+            )
+
+        try:
+            target_quote_amount = float(payload.get("target_quote_amount", "0"))
+        except (TypeError, ValueError) as exc:
+            raise ExecutorPreflightError(
+                "executor_preflight_invalid_amount",
+                "target_quote_amount must be a positive number",
+            ) from exc
+        if target_quote_amount <= 0:
+            raise ExecutorPreflightError(
+                "executor_preflight_invalid_amount",
+                "target_quote_amount must be a positive number",
+            )
+
+        if (
+            payload.get("buy_account_id") is not None
+            and payload.get("sell_account_id") is not None
+        ):
+            if not execution_accounts_by_exchange:
+                raise ExecutorPreflightError(
+                    "executor_preflight_account_resolution_failed",
+                    "binding payload requires resolved execution accounts",
+                )
+            for exchange in (buy_exchange, sell_exchange):
+                if execution_accounts_by_exchange.get(exchange) is None:
+                    raise ExecutorPreflightError(
+                        "executor_preflight_account_resolution_failed",
+                        f"missing resolved execution account for exchange={exchange}",
+                    )
+
+        if execution_accounts_by_exchange:
+            for exchange in (buy_exchange, sell_exchange):
+                resolved_account = execution_accounts_by_exchange.get(exchange)
+                if resolved_account is None:
+                    continue
+                resolved_exchange = (
+                    resolved_account.get("exchange")
+                    if isinstance(resolved_account, dict)
+                    else getattr(resolved_account, "exchange", None)
+                )
+                if resolved_exchange is None:
+                    continue
+                if str(resolved_exchange) != exchange:
+                    raise ExecutorPreflightError(
+                        "executor_preflight_account_exchange_mismatch",
+                        f"resolved execution account exchange mismatch for {exchange}",
+                    )
+
+
 class ContinuousSpotScanner:
     def __init__(
         self,
@@ -481,6 +567,7 @@ class RedisExecutionTaskConsumer(RedisSpotConsumer):
         task_repository=None,
         account_repository=None,
         account_truth_resolver=None,
+        preflight_validator=None,
         env_mode: str = "testnet",
         **kwargs,
     ) -> None:
@@ -489,6 +576,7 @@ class RedisExecutionTaskConsumer(RedisSpotConsumer):
         self.task_repository = task_repository
         self.account_repository = account_repository
         self.account_truth_resolver = account_truth_resolver
+        self.preflight_validator = preflight_validator or ExecutorPreflightValidator()
         self.env_mode = env_mode
 
     def _resolve_execution_accounts(self, *, payload: dict) -> dict | None:
@@ -624,6 +712,10 @@ class RedisExecutionTaskConsumer(RedisSpotConsumer):
 
                         execution_accounts_by_exchange = (
                             self._resolve_execution_accounts(payload=effective_payload)
+                        )
+                        self.preflight_validator.validate(
+                            payload=effective_payload,
+                            execution_accounts_by_exchange=execution_accounts_by_exchange,
                         )
                         dispatch_credentials_by_exchange = credentials_by_exchange
                         proxies_by_exchange = None

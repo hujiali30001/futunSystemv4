@@ -9,6 +9,8 @@ from app.runtime.executor_account_truth import (
 )
 from app.runtime.live_workers import (
     ContinuousSpotScanner,
+    ExecutorPreflightError,
+    ExecutorPreflightValidator,
     RedisNodeTaskDispatcher,
     RedisExecutionTaskConsumer,
     RedisSpotConsumer,
@@ -686,6 +688,215 @@ def test_evaluate_account_exchange_coverage_fails_when_one_side_region_is_incomp
     }
     assert coverage["has_market_type_coverage"] is True
     assert coverage["has_region_coverage"] is False
+
+
+def test_executor_preflight_validator_rejects_missing_required_fields():
+    validator = ExecutorPreflightValidator()
+
+    with pytest.raises(ExecutorPreflightError) as exc_info:
+        validator.validate(
+            payload={
+                "user_id": "42",
+                "symbol": "BTC/USDT",
+                "buy_exchange": "okx",
+            },
+            execution_accounts_by_exchange=None,
+        )
+
+    assert exc_info.value.reason == "executor_preflight_invalid_payload"
+
+
+def test_executor_preflight_validator_rejects_same_exchange():
+    validator = ExecutorPreflightValidator()
+
+    with pytest.raises(ExecutorPreflightError) as exc_info:
+        validator.validate(
+            payload={
+                "task_uuid": "task-1",
+                "user_id": "42",
+                "symbol": "BTC/USDT",
+                "buy_exchange": "okx",
+                "sell_exchange": "okx",
+                "target_quote_amount": "40.0",
+            },
+            execution_accounts_by_exchange=None,
+        )
+
+    assert exc_info.value.reason == "executor_preflight_same_exchange"
+
+
+def test_executor_preflight_validator_rejects_invalid_amount():
+    validator = ExecutorPreflightValidator()
+
+    with pytest.raises(ExecutorPreflightError) as exc_info:
+        validator.validate(
+            payload={
+                "task_uuid": "task-1",
+                "user_id": "42",
+                "symbol": "BTC/USDT",
+                "buy_exchange": "okx",
+                "sell_exchange": "gate",
+                "target_quote_amount": "0",
+            },
+            execution_accounts_by_exchange=None,
+        )
+
+    assert exc_info.value.reason == "executor_preflight_invalid_amount"
+
+
+def test_executor_preflight_validator_rejects_missing_binding_resolution():
+    validator = ExecutorPreflightValidator()
+
+    with pytest.raises(ExecutorPreflightError) as exc_info:
+        validator.validate(
+            payload={
+                "task_uuid": "task-1",
+                "user_id": "42",
+                "symbol": "BTC/USDT",
+                "buy_exchange": "okx",
+                "sell_exchange": "gate",
+                "buy_account_id": "101",
+                "sell_account_id": "202",
+                "target_quote_amount": "40.0",
+            },
+            execution_accounts_by_exchange={},
+        )
+
+    assert exc_info.value.reason == "executor_preflight_account_resolution_failed"
+
+
+def test_executor_preflight_validator_rejects_account_exchange_mismatch():
+    validator = ExecutorPreflightValidator()
+    wrong_buy_account = type(
+        "ResolvedAccount",
+        (),
+        {"exchange": "bitget", "credentials": "cred-a", "proxies": {}},
+    )()
+    sell_account = type(
+        "ResolvedAccount",
+        (),
+        {"exchange": "gate", "credentials": "cred-b", "proxies": {}},
+    )()
+
+    with pytest.raises(ExecutorPreflightError) as exc_info:
+        validator.validate(
+            payload={
+                "task_uuid": "task-1",
+                "user_id": "42",
+                "symbol": "BTC/USDT",
+                "buy_exchange": "okx",
+                "sell_exchange": "gate",
+                "buy_account_id": "101",
+                "sell_account_id": "202",
+                "target_quote_amount": "40.0",
+            },
+            execution_accounts_by_exchange={
+                "okx": wrong_buy_account,
+                "gate": sell_account,
+            },
+        )
+
+    assert exc_info.value.reason == "executor_preflight_account_exchange_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_executor_preflight_same_exchange_marks_task_failed_without_dispatch():
+    redis_client = FakeRedis(
+        xread_messages=[
+            (
+                "stream:spot_exec_tasks:node-a",
+                [
+                    (
+                        "1-0",
+                        {
+                            "task_uuid": "task-1",
+                            "user_id": "42",
+                            "symbol": "BTC/USDT",
+                            "buy_exchange": "okx",
+                            "sell_exchange": "okx",
+                            "target_quote_amount": "40.0",
+                        },
+                    )
+                ],
+            )
+        ]
+    )
+    repository = FakeTaskRepository(task_uuid="task-1")
+    service = FakeSpotService()
+    consumer = RedisExecutionTaskConsumer(
+        redis_client=redis_client,
+        dispatcher=RedisOpportunityDispatcher(service),
+        stream_key="stream:spot_exec_tasks:node-a",
+        task_repository=repository,
+        block_ms=1,
+        region="node-a",
+    )
+
+    processed = await consumer.run(
+        credentials_by_exchange={"okx": object()},
+        max_iterations=1,
+    )
+
+    assert processed == 0
+    assert service.calls == []
+    assert repository.executing == [("task-1", "node-a")]
+    assert repository.failed == [("task-1", "executor_preflight_same_exchange")]
+
+
+@pytest.mark.asyncio
+async def test_executor_preflight_binding_resolution_failed_without_dispatch():
+    redis_client = FakeRedis(
+        xread_messages=[
+            (
+                "stream:spot_exec_tasks:node-a",
+                [
+                    (
+                        "1-0",
+                        {
+                            "task_uuid": "task-1",
+                            "user_id": "42",
+                            "symbol": "BTC/USDT",
+                            "buy_exchange": "bitget",
+                            "sell_exchange": "gate",
+                            "buy_account_id": "101",
+                            "sell_account_id": "202",
+                            "target_quote_amount": "40.0",
+                        },
+                    )
+                ],
+            )
+        ]
+    )
+    repository = FakeTaskRepository(task_uuid="task-1")
+    service = FakeSpotService()
+    resolver = FakeExecutorAccountTruthResolver(resolved={})
+    consumer = RedisExecutionTaskConsumer(
+        redis_client=redis_client,
+        dispatcher=RedisOpportunityDispatcher(service),
+        stream_key="stream:spot_exec_tasks:node-a",
+        task_repository=repository,
+        account_repository=FakeAccountRepository(
+            {
+                "42": [
+                    FakeExchangeAccount(exchange="bitget"),
+                    FakeExchangeAccount(exchange="gate"),
+                ]
+            }
+        ),
+        account_truth_resolver=resolver,
+        env_mode="testnet",
+        block_ms=1,
+        region="node-a",
+    )
+
+    processed = await consumer.run(max_iterations=1)
+
+    assert processed == 0
+    assert service.calls == []
+    assert repository.executing == [("task-1", "node-a")]
+    assert repository.failed == [
+        ("task-1", "executor_preflight_account_resolution_failed")
+    ]
 
 
 class FakeRedis:
@@ -2655,10 +2866,12 @@ async def test_executor_worker_reads_only_its_node_stream():
                     (
                         "1-0",
                         {
+                            "task_uuid": "task-1",
                             "user_id": "42",
                             "symbol": "BTC/USDT",
                             "buy_exchange": "okx",
                             "sell_exchange": "gate",
+                            "target_quote_amount": "40.0",
                         },
                     )
                 ],
@@ -2703,6 +2916,7 @@ async def test_executor_resolves_db_accounts_before_dispatch():
                             "symbol": "BTC/USDT",
                             "buy_exchange": "bitget",
                             "sell_exchange": "gate",
+                            "target_quote_amount": "40.0",
                         },
                     )
                 ],
@@ -2760,6 +2974,7 @@ async def test_executor_resolves_db_accounts_before_dispatch():
                 "symbol": "BTC/USDT",
                 "buy_exchange": "bitget",
                 "sell_exchange": "gate",
+                "target_quote_amount": "40.0",
             },
             "credentials_by_exchange": {
                 "bitget": "cred-a",
@@ -3022,6 +3237,7 @@ async def test_executor_blocks_even_if_dispatcher_already_published_task():
                     (
                         "1-0",
                         {
+                            "task_uuid": "task-1",
                             "user_id": "42",
                             "symbol": "BTC/USDT",
                             "buy_exchange": "okx",
@@ -3112,6 +3328,7 @@ async def test_executor_emits_control_rule_blocked_event_before_dispatch():
                     (
                         "1-0",
                         {
+                            "task_uuid": "task-1",
                             "user_id": "42",
                             "symbol": "BTC/USDT",
                             "buy_exchange": "okx",
@@ -3167,6 +3384,7 @@ async def test_executor_emits_control_rule_resized_event():
                     (
                         "1-0",
                         {
+                            "task_uuid": "task-1",
                             "user_id": "42",
                             "symbol": "BTC/USDT",
                             "buy_exchange": "okx",
