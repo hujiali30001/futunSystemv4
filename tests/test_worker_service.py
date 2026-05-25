@@ -323,6 +323,23 @@ async def test_default_worker_factory_builds_executor_with_control_guard():
     assert worker.consumer.control_guard.region == "node-a"
 
 
+def test_build_executor_worker_uses_trade_execution_service():
+    factory = DefaultWorkerFactory(
+        settings=WorkerSettings(
+            worker_role="executor",
+            worker_region="node-a",
+            node_id="node-a",
+            spot_exchanges=["okx", "gate"],
+        ),
+        event_router=FakeEventRouter(),
+    )
+
+    worker = factory.build_executor_worker(redis_client=FakeRedis())
+
+    assert worker.consumer.dispatcher.spot_service is factory.trade_execution_service
+    assert worker.consumer.dispatcher.spot_service is not factory.spot_service
+
+
 @pytest.mark.asyncio
 async def test_default_worker_factory_builds_executor_worker_with_execution_summary_dependencies():
     settings = WorkerSettings(

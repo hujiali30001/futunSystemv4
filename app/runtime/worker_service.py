@@ -36,6 +36,7 @@ from app.runtime.redis_flow import (
 )
 from app.runtime.runtime_events import RuntimeEvent
 from app.runtime.spot_arbitrage_probe import SpotArbitrageProbeService
+from app.runtime.trade_execution_service import RuntimeTradeExecutionService
 from app.runtime.worker_config import (
     AlertSettings,
     WorkerSettings,
@@ -88,6 +89,9 @@ class DefaultWorkerFactory:
     event_router: Any
     session_factory: ExchangeClientFactory = field(default_factory=ExchangeClientFactory)
     spot_service: SpotArbitrageProbeService = field(default_factory=SpotArbitrageProbeService)
+    trade_execution_service: RuntimeTradeExecutionService = field(
+        default_factory=RuntimeTradeExecutionService
+    )
 
     def build_scanner_worker(self, *, redis_client: Redis) -> ScannerWorker:
         flow_service = LiveSpotFlowService(
@@ -151,7 +155,7 @@ class DefaultWorkerFactory:
         )
 
     def build_executor_worker(self, *, redis_client: Redis) -> ConsumerWorker:
-        dispatcher = RedisOpportunityDispatcher(self.spot_service)
+        dispatcher = RedisOpportunityDispatcher(self.trade_execution_service)
         control_guard = ControlGuard(
             control_plane_loader=ControlPlaneLoader(ControlPlaneStore(redis_client)),
             event_router=self.event_router,
