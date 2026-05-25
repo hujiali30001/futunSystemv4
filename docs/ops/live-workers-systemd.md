@@ -532,6 +532,42 @@ summary。
   `execution_status`、`filled_exchanges_json`、`failed_exchanges_json`、`repair_action`、
   `repair_reason` 五个任务表字段，避免主机表结构落后导致验证假失败
 
+### Executor Repair Planned Event Validation
+
+`executor.repair_planned` 远端闭环采用主服务器 helper 模式验证，不依赖
+`furun-spot-executor.service` 当前运行状态，也不会触发真实交易所下单。
+
+本次 helper 路径：
+
+- `.tmp-ssh/executor_repair_planned_event_remote_helper.py`
+- `.tmp-ssh/sync_and_validate_executor_repair_planned_event.py`
+- `.tmp-ssh/executor_repair_planned_event_remote_output.json`
+
+主服务器实测记录（2026-05-25）：
+
+- `partial_with_repair` 已通过：
+  - `processed = 1`
+  - 出现 1 条 `executor.repair_planned`
+  - `execution_status = OPEN_PARTIAL`
+  - `filled_exchanges = ["okx"]`
+  - `failed_exchanges = ["gate"]`
+  - `repair_action = AUTO_HEDGE_REPAIRING`
+  - `repair_reason = one_leg_failed`
+  - `target_exchanges = ["gate"]`
+- `hedged_no_repair` 非误发已通过：
+  - `processed = 1`
+  - `repair_planned_events = []`
+  - `execution_result_events` 仍存在正常结果事件
+- `preflight` 非误发已通过：
+  - `processed = 0`
+  - `repair_planned_events = []`
+  - `execution_result_events = []`
+
+本次验证结论：
+
+- 主服务器代码与虚拟环境下，`executor.repair_planned` 事件闭环已通过
+- 本次验证只覆盖 helper canary，不代表 systemd 日志链已完整演练
+
 ### Executor Execution Result Event Validation
 
 `executor.execution_result` 远端闭环采用主服务器 helper 模式验证，不依赖
