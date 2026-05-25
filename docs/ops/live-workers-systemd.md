@@ -532,6 +532,44 @@ summary。
   `execution_status`、`filled_exchanges_json`、`failed_exchanges_json`、`repair_action`、
   `repair_reason` 五个任务表字段，避免主机表结构落后导致验证假失败
 
+### Executor Execution Result Event Validation
+
+`executor.execution_result` 远端闭环采用主服务器 helper 模式验证，不依赖
+`furun-spot-executor.service` 当前运行状态，也不会触发真实交易所下单。
+
+本次 helper 路径：
+
+- `.tmp-ssh/executor_execution_result_event_remote_helper.py`
+- `.tmp-ssh/sync_and_validate_executor_execution_result_event.py`
+
+主服务器实测记录（2026-05-25）：
+
+- `rich_hedged` 已通过：
+  - `processed = 1`
+  - 出现 1 条 `executor.execution_result`
+  - `execution_status = OPEN_HEDGED`
+  - `filled_exchanges = ["okx", "gate"]`
+  - `buy_leg_status = final_fetched`
+  - `sell_leg_status = final_fetched`
+- `rich_partial` 已通过：
+  - `processed = 1`
+  - 出现 1 条 `executor.execution_result`
+  - `execution_status = OPEN_PARTIAL`
+  - `failed_exchanges = ["gate"]`
+  - `sell_leg_error_code = sell_create_failed`
+  - `failed_stage = create_sell`
+- `preflight` 非误发已通过：
+  - `processed = 0`
+  - `execution_result_events = []`
+  - `repository_failures[0].reason = executor_preflight_same_exchange`
+
+本次验证结论：
+
+- 主服务器代码与虚拟环境下，`executor.execution_result` 事件闭环已通过
+- `rich_hedged` 与 `rich_partial` 都准确发出结构化 `executor.execution_result`
+- preflight 失败路径不会误发 `executor.execution_result`
+- 本次验证只覆盖 helper canary，不代表 systemd 日志链已完整演练
+
 ### Spot Probe Rich Result Validation
 
 `spot_arbitrage_probe` richer result 改造完成后，建议在主服务器直接用
