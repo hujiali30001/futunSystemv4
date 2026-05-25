@@ -9,7 +9,7 @@ from app.db.task_repository import ArbitrageTaskCreate
 from app.runtime.redis_flow import build_node_execution_task_payload
 from app.runtime.runtime_events import RuntimeEvent
 from app.trading.executor import ExecutionResult
-from app.trading.risk_manager import RiskManager
+from app.trading.risk_manager import RepairPlan, RiskManager
 
 
 @dataclass(slots=True)
@@ -152,6 +152,55 @@ def _build_executor_execution_result_event(
             "buy_leg_error_detail": getattr(result, "buy_leg_error_detail", None),
             "sell_leg_error_detail": getattr(result, "sell_leg_error_detail", None),
             "failed_stage": getattr(result, "failed_stage", None),
+        },
+    )
+
+
+def _build_executor_repair_planned_event(
+    *,
+    region: str,
+    payload: dict[str, object],
+    execution_status: str,
+    filled_exchanges: list[str],
+    failed_exchanges: list[str],
+    repair_plan: RepairPlan,
+) -> RuntimeEvent:
+    buy_exchange = (
+        str(payload["buy_exchange"]) if payload.get("buy_exchange") is not None else None
+    )
+    sell_exchange = (
+        str(payload["sell_exchange"]) if payload.get("sell_exchange") is not None else None
+    )
+    exchanges = [
+        exchange for exchange in (buy_exchange, sell_exchange) if exchange is not None
+    ]
+    return RuntimeEvent(
+        event_type="executor.repair_planned",
+        level="INFO",
+        service="executor",
+        region=region,
+        symbol=str(payload["symbol"]) if payload.get("symbol") is not None else None,
+        exchange=buy_exchange,
+        exchanges=exchanges,
+        message="executor repair planned",
+        payload={
+            "task_uuid": (
+                str(payload["task_uuid"]) if payload.get("task_uuid") is not None else None
+            ),
+            "user_id": (
+                str(payload["user_id"]) if payload.get("user_id") is not None else None
+            ),
+            "symbol": (
+                str(payload["symbol"]) if payload.get("symbol") is not None else None
+            ),
+            "buy_exchange": buy_exchange,
+            "sell_exchange": sell_exchange,
+            "execution_status": execution_status,
+            "filled_exchanges": list(filled_exchanges),
+            "failed_exchanges": list(failed_exchanges),
+            "repair_action": repair_plan.action,
+            "repair_reason": repair_plan.reason,
+            "target_exchanges": list(failed_exchanges),
         },
     )
 
@@ -818,6 +867,22 @@ class RedisExecutionTaskConsumer(RedisSpotConsumer):
                                     failed_exchanges=failed_exchanges,
                                 )
                             )
+                            if (
+                                self.event_router is not None
+                                and execution_status == "OPEN_PARTIAL"
+                                and failed_exchanges
+                                and repair_plan.action != "NONE"
+                            ):
+                                await self.event_router.dispatch(
+                                    _build_executor_repair_planned_event(
+                                        region=self.region,
+                                        payload=effective_payload,
+                                        execution_status=execution_status,
+                                        filled_exchanges=filled_exchanges,
+                                        failed_exchanges=failed_exchanges,
+                                        repair_plan=repair_plan,
+                                    )
+                                )
                             lifecycle_status = (
                                 "SUCCEEDED"
                                 if execution_status == "OPEN_HEDGED"
