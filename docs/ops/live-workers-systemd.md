@@ -568,6 +568,44 @@ summary。
 - 主服务器代码与虚拟环境下，`executor.repair_planned` 事件闭环已通过
 - 本次验证只覆盖 helper canary，不代表 systemd 日志链已完整演练
 
+### Repair Worker Validation
+
+最小 `repair worker` 远端闭环采用主服务器 helper 模式验证，不依赖
+`furun-spot-executor.service` 或未来 repair service 当前运行状态，也不会触发真实交易所下单。
+
+本次 helper 路径：
+
+- `.tmp-ssh/repair_worker_remote_helper.py`
+- `.tmp-ssh/sync_and_validate_repair_worker.py`
+- `.tmp-ssh/repair_worker_remote_output.json`
+
+主服务器实测记录（2026-05-25）：
+
+- `repair_success` 已通过：
+  - `processed_executor = 1`
+  - `processed_repair = 1`
+  - 出现 1 条 `executor.repair_planned`
+  - 出现 1 条 `repair.task.finished`
+  - `task_status = SUCCEEDED`
+  - `task_execution_status = OPEN_HEDGED`
+- `repair_failure` 已通过：
+  - `processed_executor = 1`
+  - `processed_repair = 1`
+  - 出现 1 条 `repair.task.finished`
+  - `task_status = FAILED`
+  - `task_execution_status = OPEN_PARTIAL`
+  - `task_status_reason = manual_required`
+- `no_repair_publish` 非误发已通过：
+  - `processed_executor = 1`
+  - `processed_repair = 0`
+  - `repair_task_messages = []`
+  - `repair_finished_events = []`
+
+本次验证结论：
+
+- 主服务器代码与虚拟环境下，最小 repair worker 双消费者闭环已通过
+- 本次验证只覆盖 helper canary，不代表 systemd repair 链已完整演练
+
 ### Executor Execution Result Event Validation
 
 `executor.execution_result` 远端闭环采用主服务器 helper 模式验证，不依赖
