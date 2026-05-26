@@ -204,6 +204,44 @@ def test_feishu_notifier_renders_chinese_success_message():
     assert "卖出交易所：gate" in body["content"]["text"]
 
 
+def test_feishu_notifier_renders_arbitrage_failure_message():
+    captured = {}
+
+    def fake_urlopen(request, timeout=5):
+        captured["body"] = request.data
+        return FakeHttpResponse()
+
+    notifier = FeishuNotifier(
+        webhook_url="https://example.test/hook",
+        urlopen=fake_urlopen,
+    )
+    event = RuntimeEvent(
+        event_type="arb.executor.task_failed",
+        level="ERROR",
+        service="arb_executor",
+        message="arbitrage executor task failed",
+        symbol="BTC/USDT",
+        payload={
+            "task_uuid": "arb-close-1",
+            "task_type": "close",
+            "spot_exchange": "binance",
+            "derivative_exchange": "okx",
+            "failed_exchanges": ["binance", "okx"],
+            "error": "FAILED",
+        },
+    )
+
+    notifier.send_sync(event)
+    body = json.loads(captured["body"].decode("utf-8"))
+
+    assert "套利任务失败" in body["content"]["text"]
+    assert "交易对：BTC/USDT" in body["content"]["text"]
+    assert "任务类型：close" in body["content"]["text"]
+    assert "现货交易所：binance" in body["content"]["text"]
+    assert "衍生品交易所：okx" in body["content"]["text"]
+    assert "原因：FAILED" in body["content"]["text"]
+
+
 def test_email_notifier_builds_and_sends_message():
     smtp_instances = []
 
@@ -336,6 +374,53 @@ async def test_alert_router_does_not_send_external_notifications_for_control_rul
     assert len(router.logger.events) == 1
     assert router.logger.events[0].event_type == "control.rule.blocked"
     assert len(router.feishu_notifier.events) == 0
+    assert len(router.email_notifier.events) == 0
+
+
+@pytest.mark.asyncio
+async def test_alert_router_does_not_send_feishu_for_info_arbitrage_events():
+    router = build_router()
+    event = RuntimeEvent(
+        event_type="arb.dispatcher.task_created",
+        level="INFO",
+        service="arb_dispatcher",
+        message="arbitrage dispatcher task created",
+        symbol="BTC/USDT",
+        payload={"task_uuid": "arb-open-1"},
+    )
+
+    await router.dispatch(event)
+
+    assert len(router.logger.events) == 1
+    assert len(router.feishu_notifier.events) == 0
+    assert len(router.email_notifier.events) == 0
+
+
+@pytest.mark.asyncio
+async def test_alert_router_sends_feishu_for_error_arbitrage_repair_event():
+    router = build_router()
+    event = RuntimeEvent(
+        event_type="arb.repair.finished",
+        level="ERROR",
+        service="arb_repair",
+        message="arbitrage repair finished",
+        symbol="BTC/USDT",
+        payload={
+            "task_uuid": "arb-open-2",
+            "task_type": "open",
+            "spot_exchange": "binance",
+            "derivative_exchange": "okx",
+            "status": "MANUAL_REQUIRED",
+            "remaining_failed_exchanges": ["okx"],
+            "reason": "repair order failed",
+            "error": "repair order failed",
+        },
+    )
+
+    await router.dispatch(event)
+
+    assert len(router.logger.events) == 1
+    assert len(router.feishu_notifier.events) == 1
     assert len(router.email_notifier.events) == 0
 
 

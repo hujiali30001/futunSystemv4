@@ -19,6 +19,13 @@ def _event_title_zh(event: RuntimeEvent) -> str:
         "scanner.iteration.failed": "扫描任务异常",
         "consumer.message.failed": "机会消费异常",
         "opportunity.detected": "检测到套利机会",
+        "arb.dispatcher.user_discovered": "套利用户命中",
+        "arb.dispatcher.task_created": "套利任务已创建",
+        "arb.dispatcher.task_skipped": "套利任务已跳过",
+        "arb.executor.execution_result": "套利执行结果",
+        "arb.executor.repair_planned": "套利修复已计划",
+        "arb.executor.task_failed": "套利任务失败",
+        "arb.repair.finished": "套利修复完成",
     }
     return mapping.get(event.event_type, event.event_type)
 
@@ -53,6 +60,25 @@ class FeishuNotifier:
 
     def _render_text(self, event: RuntimeEvent) -> str:
         title = _event_title_zh(event)
+        if event.event_type.startswith("arb."):
+            payload = event.payload or {}
+            failed_exchanges = ",".join(payload.get("failed_exchanges", []) or []) or "-"
+            remaining_failed = (
+                ",".join(payload.get("remaining_failed_exchanges", []) or []) or "-"
+            )
+            return "\n".join(
+                [
+                    title,
+                    f"服务：{event.service}",
+                    f"交易对：{event.symbol or '-'}",
+                    f"任务类型：{payload.get('task_type', '-')}",
+                    f"现货交易所：{payload.get('spot_exchange', '-')}",
+                    f"衍生品交易所：{payload.get('derivative_exchange', '-')}",
+                    f"失败交易所：{failed_exchanges}",
+                    f"剩余失败交易所：{remaining_failed}",
+                    f"原因：{payload.get('error', payload.get('reason', event.message))}",
+                ]
+            )
         if event.event_type == "opportunity.detected":
             return "\n".join(
                 [
