@@ -327,6 +327,23 @@ async def test_default_worker_factory_builds_executor_with_control_guard():
     assert worker.consumer.control_guard.region == "node-a"
 
 
+def test_build_executor_worker_uses_repair_task_publisher_by_default():
+    factory = DefaultWorkerFactory(
+        settings=WorkerSettings(
+            worker_role="executor",
+            worker_region="node-a",
+            node_id="node-a",
+            spot_exchanges=["okx", "gate"],
+        ),
+        event_router=FakeEventRouter(),
+    )
+
+    worker = factory.build_executor_worker(redis_client=FakeRedis())
+
+    assert worker.consumer.repair_task_publisher is not None
+    assert type(worker.consumer.repair_task_publisher).__name__ == "RepairTaskPublisher"
+
+
 def test_build_executor_worker_uses_trade_execution_service():
     factory = DefaultWorkerFactory(
         settings=WorkerSettings(
@@ -361,6 +378,48 @@ async def test_default_worker_factory_builds_executor_worker_with_execution_summ
     assert worker.consumer.account_truth_resolver is not None
     assert worker.consumer.risk_manager is not None
     assert worker.consumer.env_mode == settings.env_mode
+
+
+@pytest.mark.asyncio
+async def test_worker_app_runs_executor_role_with_repair_task_publisher(monkeypatch):
+    seed_credentials(monkeypatch)
+    redis_client = FakeRedis()
+    default_factory = DefaultWorkerFactory(
+        settings=WorkerSettings(
+            worker_role="executor",
+            worker_region="node-a",
+            node_id="node-a",
+            spot_exchanges=["okx", "gate"],
+        ),
+        event_router=FakeEventRouter(),
+    )
+
+    build_calls = {}
+
+    class CapturingFactory:
+        def build_executor_worker(self, *, redis_client):
+            worker = default_factory.build_executor_worker(redis_client=redis_client)
+            build_calls["repair_task_publisher"] = worker.consumer.repair_task_publisher
+            return worker
+
+    app = WorkerApp(
+        settings=WorkerSettings(
+            worker_role="executor",
+            worker_region="node-a",
+            node_id="node-a",
+            spot_exchanges=["okx", "gate"],
+        ),
+        alert_settings=AlertSettings(alerts_enabled=True),
+        redis_factory=lambda _: redis_client,
+        worker_factory=CapturingFactory(),
+        event_router=FakeEventRouter(),
+    )
+
+    with pytest.raises(AttributeError):
+        await app.run()
+
+    assert build_calls["repair_task_publisher"] is not None
+    assert type(build_calls["repair_task_publisher"]).__name__ == "RepairTaskPublisher"
 
 
 def test_build_repair_worker_uses_repair_execution_service():

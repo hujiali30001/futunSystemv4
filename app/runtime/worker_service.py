@@ -32,6 +32,7 @@ from app.runtime.live_workers import (
 from app.runtime.repair_execution_service import RuntimeRepairExecutionService
 from app.runtime.redis_flow import (
     NodeExecutionTaskPublisher,
+    RepairTaskPublisher,
     RedisOpportunityDispatcher,
     UserNodeRouter,
     UserNodeRouteStore,
@@ -185,6 +186,7 @@ class DefaultWorkerFactory:
             account_repository=account_repository,
             account_truth_resolver=account_truth_resolver,
             risk_manager=RiskManager(),
+            repair_task_publisher=RepairTaskPublisher(redis_client),
             env_mode=self.settings.env_mode,
             block_ms=self.settings.consumer_block_ms,
             event_router=self.event_router,
