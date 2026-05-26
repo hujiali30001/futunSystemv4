@@ -11,6 +11,8 @@ from app.runtime.live_workers import (
     ContinuousSpotScanner,
     ExecutorPreflightError,
     ExecutorPreflightValidator,
+    RedisArbitrageConsumer,
+    RedisArbitrageTaskDispatcher,
     RedisNodeTaskDispatcher,
     RedisExecutionTaskConsumer,
     RedisRepairTaskConsumer,
@@ -159,6 +161,33 @@ class FakeTaskRepository:
     def mark_repair_result(self, task_uuid: str, **kwargs):
         self.repair_results.append({"task_uuid": task_uuid, **kwargs})
         return None
+
+
+class FakeArbitrageDispatchRepository(FakeTaskRepository):
+    def __init__(self, *, task_uuid: str, closeable_contexts=None):
+        super().__init__(task_uuid=task_uuid)
+        self.closeable_contexts = list(closeable_contexts or [])
+        self.close_context_calls = []
+
+    def find_closeable_task(
+        self,
+        *,
+        user_id: int,
+        symbol: str,
+        spot_exchange: str,
+        derivative_exchange: str,
+        env_mode: str,
+    ):
+        self.close_context_calls.append(
+            {
+                "user_id": user_id,
+                "symbol": symbol,
+                "spot_exchange": spot_exchange,
+                "derivative_exchange": derivative_exchange,
+                "env_mode": env_mode,
+            }
+        )
+        return None if not self.closeable_contexts else self.closeable_contexts.pop(0)
 
 
 class FakeEventRouter:
@@ -1140,6 +1169,299 @@ async def test_redis_consumer_accepts_event_router_without_affecting_dispatch():
 
     assert processed == 1
     assert dispatcher.payloads[0][0]["symbol"] == "BTC/USDT"
+
+
+@pytest.mark.asyncio
+async def test_arbitrage_consumer_reads_stream_opportunities_and_forwards_message_id():
+    dispatcher = FakeDispatcher()
+    consumer = RedisArbitrageConsumer(
+        redis_client=FakeRedis(
+            xread_messages=[
+                (
+                    "stream:opportunities",
+                    [
+                        (
+                            "9-1",
+                            {
+                                "symbol": "BTC/USDT",
+                                "spot_exchange": "binance",
+                                "derivative_exchange": "okx",
+                                "opportunity_type": "OPEN",
+                                "open_spread_bps": "20.0",
+                                "close_spread_bps": "10.0",
+                                "funding_rate": "0.0005",
+                                "annualized_bps": "40.0",
+                                "redis_member": "binance:okx:BTC/USDT:OPEN:1",
+                                "timestamp": "1.0",
+                            },
+                        )
+                    ],
+                )
+            ]
+        ),
+        dispatcher=dispatcher,
+        stream_key="stream:opportunities",
+        block_ms=0,
+    )
+
+    processed = await consumer.run(max_iterations=1)
+
+    assert processed == 1
+    assert dispatcher.calls[0]["payload"]["source_message_id"] == "9-1"
+    assert dispatcher.calls[0]["payload"]["opportunity_type"] == "OPEN"
+
+
+@pytest.mark.asyncio
+async def test_arbitrage_dispatcher_creates_open_task_record_from_opportunity():
+    redis_client = FakeRedis(
+        xread_messages=[
+            (
+                "stream:opportunities",
+                [
+                    (
+                        "1-0",
+                        {
+                            "symbol": "BTC/USDT",
+                            "spot_exchange": "binance",
+                            "derivative_exchange": "okx",
+                            "opportunity_type": "OPEN",
+                            "open_spread_bps": "25.0",
+                            "close_spread_bps": "14.0",
+                            "funding_rate": "0.0005",
+                            "annualized_bps": "55.0",
+                            "redis_member": "binance:okx:BTC/USDT:OPEN:1",
+                            "timestamp": "1.0",
+                            "source_message_id": "1-0",
+                        },
+                    )
+                ],
+            )
+        ]
+    )
+    redis_client.route_values = {"route:user_node:42": "node-a"}
+    repository = FakeArbitrageDispatchRepository(task_uuid="arb-open-1")
+    repository.generated_task_uuids = ["arb-open-1"]
+    strategy_repository = FakeStrategyConfigRepository(
+        [FakeStrategyConfig(id=11, target_quote_amount=80.0, open_spread_bps_threshold=20.0)]
+    )
+    dispatcher = RedisArbitrageTaskDispatcher(
+        redis_client=redis_client,
+        user_ids=["42"],
+        route_resolver=UserNodeRouter(redis_client),
+        task_repository=repository,
+        strategy_repository=strategy_repository,
+        stream_key="stream:opportunities",
+        block_ms=0,
+    )
+
+    processed = await dispatcher.run(max_iterations=1)
+
+    assert processed == 1
+    assert repository.created[0].task_type == "open"
+    assert repository.created[0].spot_exchange == "binance"
+    assert repository.created[0].derivative_exchange == "okx"
+
+
+@pytest.mark.asyncio
+async def test_arbitrage_dispatcher_uses_db_discovered_users_for_open_opportunity():
+    redis_client = FakeRedis(
+        xread_messages=[
+            (
+                "stream:opportunities",
+                [
+                    (
+                        "1-0",
+                        {
+                            "symbol": "BTC/USDT",
+                            "spot_exchange": "binance",
+                            "derivative_exchange": "okx",
+                            "opportunity_type": "OPEN",
+                            "open_spread_bps": "25.0",
+                            "close_spread_bps": "14.0",
+                            "funding_rate": "0.0005",
+                            "annualized_bps": "55.0",
+                            "redis_member": "binance:okx:BTC/USDT:OPEN:1",
+                            "timestamp": "1.0",
+                            "source_message_id": "1-0",
+                        },
+                    )
+                ],
+            )
+        ]
+    )
+    redis_client.route_values = {"route:user_node:42": "node-a"}
+    repository = FakeArbitrageDispatchRepository(task_uuid="arb-open-1")
+    repository.generated_task_uuids = ["arb-open-1"]
+    dispatcher = RedisArbitrageTaskDispatcher(
+        redis_client=redis_client,
+        user_ids=[],
+        dispatch_user_repository=FakeDispatchUserRepository(["42"]),
+        route_resolver=UserNodeRouter(redis_client),
+        task_repository=repository,
+        strategy_repository=FakeStrategyConfigRepository(
+            [FakeStrategyConfig(id=11, target_quote_amount=80.0, open_spread_bps_threshold=20.0)]
+        ),
+        stream_key="stream:opportunities",
+        block_ms=0,
+    )
+
+    processed = await dispatcher.run(max_iterations=1)
+
+    assert processed == 1
+    assert [item.user_id for item in repository.created] == [42]
+
+
+@pytest.mark.asyncio
+async def test_arbitrage_dispatcher_skips_open_when_exchange_coverage_is_missing():
+    redis_client = FakeRedis(
+        xread_messages=[
+            (
+                "stream:opportunities",
+                [
+                    (
+                        "1-0",
+                        {
+                            "symbol": "BTC/USDT",
+                            "spot_exchange": "binance",
+                            "derivative_exchange": "okx",
+                            "opportunity_type": "OPEN",
+                            "open_spread_bps": "25.0",
+                            "close_spread_bps": "14.0",
+                            "funding_rate": "0.0005",
+                            "annualized_bps": "55.0",
+                            "redis_member": "binance:okx:BTC/USDT:OPEN:1",
+                            "timestamp": "1.0",
+                            "source_message_id": "1-0",
+                        },
+                    )
+                ],
+            )
+        ]
+    )
+    redis_client.route_values = {"route:user_node:42": "node-a"}
+    repository = FakeArbitrageDispatchRepository(task_uuid="arb-open-1")
+    dispatcher = RedisArbitrageTaskDispatcher(
+        redis_client=redis_client,
+        user_ids=["42"],
+        route_resolver=UserNodeRouter(redis_client),
+        task_repository=repository,
+        strategy_repository=FakeStrategyConfigRepository(
+            [FakeStrategyConfig(id=11, target_quote_amount=80.0, open_spread_bps_threshold=20.0)]
+        ),
+        account_repository=FakeAccountRepository(
+            {"42": [FakeExchangeAccount(exchange="binance")]}
+        ),
+        stream_key="stream:opportunities",
+        block_ms=0,
+    )
+
+    processed = await dispatcher.run(max_iterations=1)
+
+    assert processed == 1
+    assert repository.created == []
+
+
+@pytest.mark.asyncio
+async def test_arbitrage_dispatcher_skips_close_without_closeable_context():
+    redis_client = FakeRedis(
+        xread_messages=[
+            (
+                "stream:opportunities",
+                [
+                    (
+                        "1-0",
+                        {
+                            "symbol": "BTC/USDT",
+                            "spot_exchange": "binance",
+                            "derivative_exchange": "okx",
+                            "opportunity_type": "CLOSE",
+                            "open_spread_bps": "25.0",
+                            "close_spread_bps": "14.0",
+                            "funding_rate": "0.0005",
+                            "annualized_bps": "55.0",
+                            "redis_member": "binance:okx:BTC/USDT:CLOSE:1",
+                            "timestamp": "1.0",
+                            "source_message_id": "1-0",
+                        },
+                    )
+                ],
+            )
+        ]
+    )
+    redis_client.route_values = {"route:user_node:42": "node-a"}
+    repository = FakeArbitrageDispatchRepository(
+        task_uuid="arb-close-1",
+        closeable_contexts=[],
+    )
+    dispatcher = RedisArbitrageTaskDispatcher(
+        redis_client=redis_client,
+        user_ids=["42"],
+        route_resolver=UserNodeRouter(redis_client),
+        task_repository=repository,
+        strategy_repository=FakeStrategyConfigRepository(
+            [FakeStrategyConfig(id=11, target_quote_amount=80.0)]
+        ),
+        stream_key="stream:opportunities",
+        block_ms=0,
+    )
+
+    processed = await dispatcher.run(max_iterations=1)
+
+    assert processed == 1
+    assert repository.created == []
+    assert repository.close_context_calls[0]["symbol"] == "BTC/USDT"
+
+
+@pytest.mark.asyncio
+async def test_arbitrage_dispatcher_creates_close_task_when_closeable_context_exists():
+    redis_client = FakeRedis(
+        xread_messages=[
+            (
+                "stream:opportunities",
+                [
+                    (
+                        "1-0",
+                        {
+                            "symbol": "BTC/USDT",
+                            "spot_exchange": "binance",
+                            "derivative_exchange": "okx",
+                            "opportunity_type": "CLOSE",
+                            "open_spread_bps": "25.0",
+                            "close_spread_bps": "14.0",
+                            "funding_rate": "0.0005",
+                            "annualized_bps": "55.0",
+                            "redis_member": "binance:okx:BTC/USDT:CLOSE:1",
+                            "timestamp": "1.0",
+                            "source_message_id": "1-0",
+                        },
+                    )
+                ],
+            )
+        ]
+    )
+    redis_client.route_values = {"route:user_node:42": "node-a"}
+    repository = FakeArbitrageDispatchRepository(
+        task_uuid="arb-close-1",
+        closeable_contexts=[type("Task", (), {"task_uuid": "open-ctx-1"})()],
+    )
+    repository.generated_task_uuids = ["arb-close-1"]
+    dispatcher = RedisArbitrageTaskDispatcher(
+        redis_client=redis_client,
+        user_ids=["42"],
+        route_resolver=UserNodeRouter(redis_client),
+        task_repository=repository,
+        strategy_repository=FakeStrategyConfigRepository(
+            [FakeStrategyConfig(id=11, target_quote_amount=80.0)]
+        ),
+        stream_key="stream:opportunities",
+        block_ms=0,
+    )
+
+    processed = await dispatcher.run(max_iterations=1)
+
+    assert processed == 1
+    assert repository.created[0].task_type == "close"
+    assert repository.created[0].opportunity_id == "1-0"
 
 
 @pytest.mark.asyncio

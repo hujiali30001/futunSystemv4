@@ -730,6 +730,255 @@ class RedisSpotConsumer:
         return processed
 
 
+class RedisArbitrageConsumer(RedisSpotConsumer):
+    processed_event_type = "arb.consumer.message.processed"
+    processed_event_service = "arb_consumer"
+    processed_event_message = "arbitrage opportunity processed"
+    failed_event_type = "arb.consumer.message.failed"
+    failed_event_service = "arb_consumer"
+    failed_event_message = "arbitrage opportunity failed"
+
+    async def run(
+        self,
+        *,
+        credentials_by_exchange: dict | None = None,
+        max_iterations: int | None = None,
+    ) -> int:
+        iteration = 0
+        processed = 0
+        while max_iterations is None or iteration < max_iterations:
+            entries = await self.redis_client.xread(
+                {self.stream_key: self.last_id},
+                count=1,
+                block=self.block_ms,
+            )
+            for _, messages in entries:
+                for message_id, payload in messages:
+                    enriched_payload = dict(payload)
+                    enriched_payload["source_message_id"] = str(
+                        payload.get("source_message_id", message_id)
+                    )
+                    try:
+                        await self.dispatcher.dispatch(
+                            enriched_payload,
+                            credentials_by_exchange=credentials_by_exchange or {},
+                        )
+                        self.last_id = message_id
+                        processed += 1
+                        if self.event_router is not None:
+                            await self.event_router.dispatch(
+                                self._build_processed_event(
+                                    message_id=message_id,
+                                    payload=enriched_payload,
+                                )
+                            )
+                    except Exception as exc:
+                        if self.event_router is not None:
+                            await self.event_router.dispatch(
+                                self._build_failed_event(
+                                    message_id=message_id,
+                                    payload=enriched_payload,
+                                    error=exc,
+                                )
+                            )
+            iteration += 1
+        return processed
+
+
+class RedisArbitrageTaskDispatcher:
+    def __init__(
+        self,
+        *,
+        redis_client,
+        user_ids: list[str],
+        route_resolver,
+        task_repository=None,
+        strategy_repository=None,
+        dispatch_user_repository=None,
+        account_repository=None,
+        stream_key: str,
+        block_ms: int = 1000,
+        region: str = "default",
+        env_mode: str = "testnet",
+    ) -> None:
+        self.redis_client = redis_client
+        self.user_ids = user_ids
+        self.route_resolver = route_resolver
+        self.task_repository = task_repository
+        self.strategy_repository = strategy_repository
+        self.dispatch_user_repository = dispatch_user_repository
+        self.account_repository = account_repository
+        self.stream_key = stream_key
+        self.block_ms = block_ms
+        self.region = region
+        self.env_mode = env_mode
+        self.last_id = "0-0"
+
+    def _resolve_candidate_user_ids(self) -> list[str]:
+        if self.dispatch_user_repository is None:
+            return list(self.user_ids)
+        discovered_user_ids = self.dispatch_user_repository.list_dispatchable_user_ids(
+            env_mode=self.env_mode
+        )
+        if not self.user_ids:
+            return discovered_user_ids
+        allowed_user_ids = set(discovered_user_ids)
+        return [user_id for user_id in self.user_ids if user_id in allowed_user_ids]
+
+    def _load_user_accounts(self, *, user_id: str) -> list[Any] | None:
+        if self.account_repository is None:
+            return None
+        accounts = self.account_repository.list_enabled_accounts(
+            user_id=int(user_id),
+            env_mode=self.env_mode,
+        )
+        return list(accounts or [])
+
+    def _has_required_account_coverage(
+        self, *, payload: dict[str, Any], accounts: list[Any] | None
+    ) -> bool:
+        if accounts is None:
+            return True
+        coverage = _evaluate_account_exchange_coverage(
+            payload={
+                "buy_exchange": payload["spot_exchange"],
+                "sell_exchange": payload["derivative_exchange"],
+            },
+            accounts=accounts,
+            dispatcher_region=self.region,
+        )
+        return bool(
+            coverage["has_exchange_coverage"] and coverage["has_auto_trade_coverage"]
+        )
+
+    def _iter_matching_strategies(self, *, user_id: str, payload: dict[str, Any]):
+        if self.strategy_repository is None:
+            return [None]
+
+        strategies = self.strategy_repository.list_enabled_for_user(
+            user_id=int(user_id),
+            strategy_type="spot_futures",
+        )
+        matched = []
+        payload_symbol = str(payload["symbol"])
+        payload_exchanges = {
+            str(payload["spot_exchange"]),
+            str(payload["derivative_exchange"]),
+        }
+        open_spread_bps = float(payload.get("open_spread_bps", 0.0))
+        for strategy in strategies:
+            symbols = list(getattr(strategy, "symbol_scope_json", []) or [])
+            exchanges = set(getattr(strategy, "exchange_scope_json", []) or [])
+            if symbols and payload_symbol not in symbols:
+                continue
+            if exchanges and (payload_exchanges - exchanges):
+                continue
+            threshold = float(getattr(strategy, "open_spread_bps_threshold", 0.0) or 0.0)
+            if (
+                str(payload["opportunity_type"]) == "OPEN"
+                and open_spread_bps < threshold
+            ):
+                continue
+            matched.append(strategy)
+        return matched
+
+    def _create_arbitrage_task(
+        self,
+        *,
+        user_id: str,
+        message_id: str,
+        payload: dict[str, Any],
+        strategy,
+    ):
+        if self.task_repository is None:
+            return None
+        strategy_id = None if strategy is None else int(strategy.id)
+        task_type = "open" if str(payload["opportunity_type"]) == "OPEN" else "close"
+        idempotency_key = f"{user_id}:{message_id}:{task_type}"
+        if strategy_id is not None:
+            idempotency_key = f"{idempotency_key}:{strategy_id}"
+        return self.task_repository.create_task(
+            ArbitrageTaskCreate(
+                task_uuid=uuid4().hex,
+                user_id=int(user_id),
+                strategy_config_id=strategy_id,
+                opportunity_id=message_id,
+                env_mode=self.env_mode,
+                task_type=task_type,
+                symbol=str(payload["symbol"]),
+                spot_exchange=str(payload["spot_exchange"]),
+                derivative_exchange=str(payload["derivative_exchange"]),
+                target_notional=(
+                    0.0
+                    if strategy is None
+                    else float(getattr(strategy, "target_quote_amount", 0.0) or 0.0)
+                ),
+                expected_spread_bps=(
+                    float(payload.get("open_spread_bps", 0.0))
+                    if task_type == "open"
+                    else float(payload.get("close_spread_bps", 0.0))
+                ),
+                expected_funding_bps=float(payload.get("funding_rate", 0.0)) * 10000,
+                idempotency_key=idempotency_key,
+                home_region=self.region,
+            )
+        )
+
+    async def run(self, *, max_iterations: int | None = None) -> int:
+        iteration = 0
+        processed = 0
+        while max_iterations is None or iteration < max_iterations:
+            entries = await self.redis_client.xread(
+                {self.stream_key: self.last_id},
+                count=1,
+                block=self.block_ms,
+            )
+            for _, messages in entries:
+                for message_id, payload in messages:
+                    effective_payload = dict(payload)
+                    effective_payload["source_message_id"] = str(
+                        payload.get("source_message_id", message_id)
+                    )
+                    for user_id in self._resolve_candidate_user_ids():
+                        node_id = await self.route_resolver.get_user_node(user_id)
+                        if node_id is None:
+                            continue
+                        accounts = self._load_user_accounts(user_id=user_id)
+                        if not self._has_required_account_coverage(
+                            payload=effective_payload,
+                            accounts=accounts,
+                        ):
+                            continue
+                        for strategy in self._iter_matching_strategies(
+                            user_id=user_id,
+                            payload=effective_payload,
+                        ):
+                            if str(effective_payload["opportunity_type"]) == "CLOSE":
+                                if self.task_repository is None:
+                                    continue
+                                closeable = self.task_repository.find_closeable_task(
+                                    user_id=int(user_id),
+                                    symbol=str(effective_payload["symbol"]),
+                                    spot_exchange=str(effective_payload["spot_exchange"]),
+                                    derivative_exchange=str(
+                                        effective_payload["derivative_exchange"]
+                                    ),
+                                    env_mode=self.env_mode,
+                                )
+                                if closeable is None:
+                                    continue
+                            self._create_arbitrage_task(
+                                user_id=user_id,
+                                message_id=str(effective_payload["source_message_id"]),
+                                payload=effective_payload,
+                                strategy=strategy,
+                            )
+                    self.last_id = message_id
+                    processed += 1
+            iteration += 1
+        return processed
+
+
 class RedisExecutionTaskConsumer(RedisSpotConsumer):
     processed_event_type = "executor.task.processed"
     processed_event_service = "executor"
