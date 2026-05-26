@@ -18,9 +18,11 @@ from app.runtime.alerting import (
     FeishuNotifier,
     StructuredEventLogger,
 )
+from app.runtime.arbitrage_execution_adapter import ArbitrageExecutionAdapter
 from app.runtime.executor_account_truth import ExecutorAccountTruthResolver
 from app.runtime.live_spot_flow import LiveSpotFlowService
 from app.runtime.live_workers import (
+    ArbitrageExecutionTaskConsumer,
     ControlGuard,
     ControlPlaneLoader,
     ContinuousSpotScanner,
@@ -85,6 +87,33 @@ class ConsumerWorker:
             credentials_by_exchange=credentials_by_exchange,
             max_iterations=None,
         )
+
+
+class ArbitrageExecutorWorker:
+    def __init__(
+        self,
+        consumer: ArbitrageExecutionTaskConsumer,
+        poll_interval_seconds: float = 1.0,
+    ) -> None:
+        self.consumer = consumer
+        self.poll_interval_seconds = poll_interval_seconds
+
+    async def run(
+        self,
+        *,
+        credentials_by_exchange: dict,
+        stream_key: str,
+        proxies_by_exchange: dict | None = None,
+    ) -> int:
+        processed = 0
+        while True:
+            current = await self.consumer.run_once(
+                credentials_by_exchange=credentials_by_exchange,
+                proxies_by_exchange=proxies_by_exchange,
+            )
+            processed += current
+            if current == 0:
+                await asyncio.sleep(self.poll_interval_seconds)
 
 
 @dataclass(slots=True)
@@ -222,6 +251,30 @@ class DefaultWorkerFactory:
             region=self.settings.worker_region,
         )
         return ConsumerWorker(consumer=consumer)
+
+    def build_arbitrage_executor_worker(
+        self, *, redis_client: Redis
+    ) -> ArbitrageExecutorWorker:
+        if not self.settings.database_enabled:
+            raise RuntimeError("arb_executor requires database_enabled=True")
+
+        session_factory = build_session_factory(self.settings.database_url)
+        session = session_factory()
+        consumer = ArbitrageExecutionTaskConsumer(
+            task_repository=TaskRepository(session),
+            execution_adapter=ArbitrageExecutionAdapter(
+                execution_service=self.trade_execution_service
+            ),
+            repair_service=self.repair_execution_service,
+            account_repository=AccountRepository(session),
+            worker_node_id=self.settings.node_id,
+            env_mode=self.settings.env_mode,
+            risk_manager=RiskManager(),
+        )
+        return ArbitrageExecutorWorker(
+            consumer=consumer,
+            poll_interval_seconds=self.settings.scanner_poll_interval_seconds,
+        )
 
     def build_repair_worker(self, *, redis_client: Redis) -> ConsumerWorker:
         task_repository = None
@@ -365,6 +418,17 @@ class WorkerApp:
                 )
                 return
 
+            if self.settings.worker_role == "arb_executor":
+                worker = factory.build_arbitrage_executor_worker(
+                    redis_client=redis_client
+                )
+                await worker.run(
+                    credentials_by_exchange=credentials_by_exchange,
+                    stream_key=self.settings.resolved_executor_stream_key,
+                    proxies_by_exchange=proxies_by_exchange,
+                )
+                return
+
             if self.settings.worker_role == "repair":
                 worker = factory.build_repair_worker(redis_client=redis_client)
                 await worker.run(
@@ -402,6 +466,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "dispatcher",
             "arb_dispatcher",
             "executor",
+            "arb_executor",
             "repair",
         ],
         default=None,

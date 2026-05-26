@@ -51,6 +51,7 @@ class FakeFactory:
         self.dispatcher_worker = FakeWorker()
         self.arb_dispatcher_worker = FakeWorker()
         self.executor_worker = FakeWorker()
+        self.arb_executor_worker = FakeWorker()
         self.repair_worker = FakeWorker()
 
     def build_scanner_worker(self, **kwargs):
@@ -69,6 +70,9 @@ class FakeFactory:
 
     def build_executor_worker(self, **kwargs):
         return self.executor_worker
+
+    def build_arbitrage_executor_worker(self, **kwargs):
+        return self.arb_executor_worker
 
     def build_repair_worker(self, **kwargs):
         return self.repair_worker
@@ -437,6 +441,28 @@ async def test_default_worker_factory_builds_executor_worker_with_execution_summ
     assert worker.consumer.env_mode == settings.env_mode
 
 
+def test_default_worker_factory_builds_arbitrage_executor_worker():
+    factory = DefaultWorkerFactory(
+        settings=WorkerSettings(
+            worker_role="arb_executor",
+            worker_region="node-a",
+            node_id="node-a",
+            spot_exchanges=["okx", "gate"],
+            database_enabled=True,
+            database_url="sqlite:///:memory:",
+        ),
+        event_router=FakeEventRouter(),
+    )
+
+    worker = factory.build_arbitrage_executor_worker(redis_client=FakeRedis())
+
+    assert type(worker.consumer).__name__ == "ArbitrageExecutionTaskConsumer"
+    assert type(worker.consumer.execution_adapter).__name__ == "ArbitrageExecutionAdapter"
+    assert worker.consumer.execution_adapter.execution_service is factory.trade_execution_service
+    assert worker.consumer.repair_service is factory.repair_execution_service
+    assert worker.consumer.worker_node_id == "node-a"
+
+
 @pytest.mark.asyncio
 async def test_worker_app_runs_executor_role_with_repair_task_publisher(monkeypatch):
     seed_credentials(monkeypatch)
@@ -570,6 +596,27 @@ async def test_worker_app_dispatches_executor_role(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_worker_app_dispatches_arb_executor_role(monkeypatch):
+    seed_credentials(monkeypatch)
+    redis_client = FakeRedis()
+    factory = FakeFactory()
+    app = WorkerApp(
+        settings=WorkerSettings(
+            worker_role="arb_executor",
+            node_id="node-a",
+            spot_exchanges=["okx", "gate"],
+        ),
+        alert_settings=AlertSettings(alerts_enabled=True),
+        redis_factory=lambda _: redis_client,
+        worker_factory=factory,
+    )
+
+    await app.run()
+
+    assert factory.arb_executor_worker.calls[0]["stream_key"] == "stream:spot_exec_tasks:node-a"
+
+
+@pytest.mark.asyncio
 async def test_worker_app_runs_repair_role(monkeypatch):
     seed_credentials(monkeypatch)
     redis_client = FakeRedis()
@@ -649,3 +696,9 @@ def test_parse_args_accepts_role_override():
     args = parse_args(["--role", "executor"])
 
     assert args.role == "executor"
+
+
+def test_parse_args_accepts_arb_executor_role_override():
+    args = parse_args(["--role", "arb_executor"])
+
+    assert args.role == "arb_executor"

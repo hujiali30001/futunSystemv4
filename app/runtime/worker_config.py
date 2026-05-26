@@ -32,6 +32,7 @@ class WorkerSettings(BaseSettings):
         "dispatcher",
         "arb_dispatcher",
         "executor",
+        "arb_executor",
         "repair",
     ] = "scanner"
     worker_region: str = "default"
