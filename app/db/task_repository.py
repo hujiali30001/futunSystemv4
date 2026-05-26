@@ -1,7 +1,7 @@
 from dataclasses import asdict, dataclass
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from models import ArbitrageTask
@@ -41,6 +41,29 @@ class TaskRepository:
     def get_by_task_uuid(self, task_uuid: str) -> ArbitrageTask | None:
         return self.session.scalar(
             select(ArbitrageTask).where(ArbitrageTask.task_uuid == task_uuid)
+        )
+
+    def find_closeable_task(
+        self,
+        *,
+        user_id: int,
+        symbol: str,
+        spot_exchange: str,
+        derivative_exchange: str,
+        env_mode: str,
+    ) -> ArbitrageTask | None:
+        return self.session.scalar(
+            select(ArbitrageTask)
+            .where(
+                ArbitrageTask.user_id == user_id,
+                ArbitrageTask.symbol == symbol,
+                ArbitrageTask.spot_exchange == spot_exchange,
+                ArbitrageTask.derivative_exchange == derivative_exchange,
+                ArbitrageTask.env_mode == env_mode,
+                ArbitrageTask.task_type == "open",
+            )
+            .order_by(desc(ArbitrageTask.id))
+            .limit(1)
         )
 
     def mark_dispatched(self, task_uuid: str, *, worker_node_id: str) -> ArbitrageTask:

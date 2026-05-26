@@ -195,6 +195,83 @@ def test_mark_repair_result_marks_manual_required_summary():
     assert refreshed.execution_status == "OPEN_PARTIAL"
 
 
+def test_task_repository_finds_closeable_open_task_by_user_symbol_and_exchanges():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = Session(engine)
+    session.add(User(id=42, username="u42"))
+    session.commit()
+
+    repository = TaskRepository(session)
+    created = repository.create_task(
+        ArbitrageTaskCreate(
+            task_uuid="task-open-1",
+            user_id=42,
+            strategy_config_id=11,
+            opportunity_id="1-0",
+            env_mode="testnet",
+            task_type="open",
+            symbol="BTC/USDT",
+            spot_exchange="binance",
+            derivative_exchange="okx",
+            target_notional=100.0,
+            expected_spread_bps=25.0,
+            expected_funding_bps=5.0,
+            idempotency_key="42:1-0:open:11",
+            home_region="main",
+        )
+    )
+
+    matched = repository.find_closeable_task(
+        user_id=42,
+        symbol="BTC/USDT",
+        spot_exchange="binance",
+        derivative_exchange="okx",
+        env_mode="testnet",
+    )
+
+    assert matched is not None
+    assert matched.task_uuid == created.task_uuid
+
+
+def test_task_repository_returns_none_when_only_close_task_exists():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = Session(engine)
+    session.add(User(id=42, username="u42"))
+    session.commit()
+
+    repository = TaskRepository(session)
+    repository.create_task(
+        ArbitrageTaskCreate(
+            task_uuid="task-close-1",
+            user_id=42,
+            strategy_config_id=11,
+            opportunity_id="2-0",
+            env_mode="testnet",
+            task_type="close",
+            symbol="BTC/USDT",
+            spot_exchange="binance",
+            derivative_exchange="okx",
+            target_notional=100.0,
+            expected_spread_bps=18.0,
+            expected_funding_bps=3.0,
+            idempotency_key="42:2-0:close:11",
+            home_region="main",
+        )
+    )
+
+    matched = repository.find_closeable_task(
+        user_id=42,
+        symbol="BTC/USDT",
+        spot_exchange="binance",
+        derivative_exchange="okx",
+        env_mode="testnet",
+    )
+
+    assert matched is None
+
+
 def test_task_repository_enforces_unique_idempotency_key():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
