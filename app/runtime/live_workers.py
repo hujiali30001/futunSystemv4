@@ -898,31 +898,67 @@ class ArbitrageAutoRecoveryDecision:
     cooldown_until: datetime | None = None
 
 
-def _decide_arbitrage_auto_recovery(
+def _cooldown_seconds_for_failure_category(*, failure_category: str, retry_count: int) -> int:
+    base_windows = {
+        "TRANSIENT_NETWORK": 0,
+        "TEMPORARY_ROUTE": 60,
+        "EXCHANGE_REJECTED": 300,
+        "REPAIR_FAILED": 180,
+        "UNKNOWN_HARD_FAILURE": 0,
+    }
+    base_seconds = int(base_windows.get(failure_category, 0) or 0)
+    if base_seconds <= 0:
+        return 0
+    multiplier = min(max(int(retry_count or 0) + 1, 1), 3)
+    return base_seconds * multiplier
+
+
+def _decide_arbitrage_recovery(
     *,
     task,
+    failure_category: str,
     failure_reason: str,
-    cooldown_seconds: int,
+    now: datetime | None = None,
 ) -> ArbitrageAutoRecoveryDecision:
     retry_count = int(getattr(task, "retry_count", 0) or 0)
-    max_retry_count = int(getattr(task, "max_retry_count", 2) or 2)
     auto_recovery_status = str(
         getattr(task, "auto_recovery_status", "NONE") or "NONE"
     )
-    if retry_count < max_retry_count:
+    current_time = now or datetime.utcnow()
+
+    if failure_category == "TRANSIENT_NETWORK":
         return ArbitrageAutoRecoveryDecision(
             action="RETRY_PENDING",
-            failure_reason=failure_reason,
+            failure_reason=failure_category,
         )
-    if auto_recovery_status != "COOLDOWN":
+    if failure_category in {"TEMPORARY_ROUTE", "EXCHANGE_REJECTED"}:
+        cooldown_seconds = _cooldown_seconds_for_failure_category(
+            failure_category=failure_category,
+            retry_count=retry_count,
+        )
         return ArbitrageAutoRecoveryDecision(
             action="COOLDOWN",
-            failure_reason=failure_reason,
-            cooldown_until=datetime.utcnow() + timedelta(seconds=cooldown_seconds),
+            failure_reason=failure_category,
+            cooldown_until=current_time + timedelta(seconds=cooldown_seconds),
+        )
+    if failure_category == "REPAIR_FAILED":
+        if auto_recovery_status == "COOLDOWN":
+            return ArbitrageAutoRecoveryDecision(
+                action="EXHAUSTED",
+                failure_reason=failure_category,
+            )
+        cooldown_seconds = _cooldown_seconds_for_failure_category(
+            failure_category=failure_category,
+            retry_count=retry_count,
+        )
+        return ArbitrageAutoRecoveryDecision(
+            action="COOLDOWN",
+            failure_reason=failure_category,
+            cooldown_until=current_time + timedelta(seconds=cooldown_seconds),
         )
     return ArbitrageAutoRecoveryDecision(
         action="EXHAUSTED",
-        failure_reason=failure_reason,
+        failure_reason="UNKNOWN_HARD_FAILURE",
     )
 
 
@@ -988,11 +1024,23 @@ class ArbitrageExecutionTaskConsumer:
             )
         return execution_accounts
 
-    async def _apply_auto_recovery(self, *, task, failure_reason: str) -> None:
-        decision = _decide_arbitrage_auto_recovery(
-            task=task,
+    async def _apply_auto_recovery(
+        self,
+        *,
+        task,
+        execution_status: str,
+        failure_reason: str,
+        repair_result: Any | None = None,
+    ) -> None:
+        failure_category = _classify_arbitrage_failure(
+            execution_status=execution_status,
             failure_reason=failure_reason,
-            cooldown_seconds=self.auto_recovery_cooldown_seconds,
+            repair_result=repair_result,
+        )
+        decision = _decide_arbitrage_recovery(
+            task=task,
+            failure_category=failure_category,
+            failure_reason=failure_reason,
         )
         updated_task = None
         if decision.action == "RETRY_PENDING":
@@ -1109,9 +1157,16 @@ class ArbitrageExecutionTaskConsumer:
                     result=repair_result,
                 )
             )
+        failure_reason = str(
+            getattr(repair_result, "reason", None)
+            or getattr(repair_result, "status", "")
+            or "repair_failed_manual_required"
+        )
         await self._apply_auto_recovery(
             task=task,
-            failure_reason="repair_failed_manual_required",
+            execution_status=str(getattr(result, "execution_status", "") or ""),
+            failure_reason=failure_reason,
+            repair_result=repair_result,
         )
 
     async def run_once(
@@ -1185,9 +1240,15 @@ class ArbitrageExecutionTaskConsumer:
                         result=result,
                     )
                 )
+            failure_reason = str(
+                getattr(result, "reason", None)
+                or getattr(result, "execution_status", "")
+                or "execution_failed_non_repairable"
+            )
             await self._apply_auto_recovery(
                 task=task,
-                failure_reason="execution_failed_non_repairable",
+                execution_status=execution_status,
+                failure_reason=failure_reason,
             )
             return 1
         except Exception as exc:

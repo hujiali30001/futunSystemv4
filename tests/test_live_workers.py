@@ -1,4 +1,5 @@
 import pytest
+from datetime import datetime, timedelta
 
 from app.admin.control_plane import ControlDecision
 from app.market.opportunity import SpotOpportunity
@@ -19,6 +20,7 @@ from app.runtime.live_workers import (
     RedisRepairTaskConsumer,
     RedisSpotConsumer,
     _classify_arbitrage_failure,
+    _decide_arbitrage_recovery,
     _evaluate_account_exchange_coverage,
     _normalize_account_region,
     _parse_market_type_scope,
@@ -5484,6 +5486,7 @@ async def test_arbitrage_execution_consumer_marks_retry_pending_for_first_non_re
                 "execution_status": "FAILED",
                 "filled_exchanges": [],
                 "failed_exchanges": ["binance", "okx"],
+                    "reason": "connection timeout while placing order",
             },
         )()
     )
@@ -5513,7 +5516,7 @@ async def test_arbitrage_execution_consumer_marks_retry_pending_for_first_non_re
     assert repository.retry_marked == [
         {
             "task_uuid": "arb-close-1",
-            "failure_reason": "execution_failed_non_repairable",
+            "failure_reason": "TRANSIENT_NETWORK",
         }
     ]
     assert repository.cooldowns == []
@@ -5553,6 +5556,7 @@ async def test_arbitrage_execution_consumer_marks_cooldown_when_retry_limit_is_r
                     "execution_status": "FAILED",
                     "filled_exchanges": [],
                     "failed_exchanges": ["binance", "okx"],
+                    "reason": "order rejected because reduce-only is required",
                 },
             )()
         ),
@@ -5578,7 +5582,7 @@ async def test_arbitrage_execution_consumer_marks_cooldown_when_retry_limit_is_r
     assert repository.retry_marked == []
     assert len(repository.cooldowns) == 1
     assert repository.cooldowns[0]["task_uuid"] == "arb-close-2"
-    assert repository.cooldowns[0]["failure_reason"] == "execution_failed_non_repairable"
+    assert repository.cooldowns[0]["failure_reason"] == "EXCHANGE_REJECTED"
     assert repository.exhausted == []
 
 
@@ -5640,7 +5644,7 @@ async def test_arbitrage_execution_consumer_marks_exhausted_after_cooldown_retry
     assert repository.exhausted == [
         {
             "task_uuid": "arb-close-3",
-            "failure_reason": "execution_failed_non_repairable",
+            "failure_reason": "UNKNOWN_HARD_FAILURE",
         }
     ]
 
@@ -5711,12 +5715,10 @@ async def test_arbitrage_execution_consumer_routes_failed_repair_into_same_recov
     )
 
     assert processed == 1
-    assert repository.retry_marked == [
-        {
-            "task_uuid": "arb-open-4",
-            "failure_reason": "repair_failed_manual_required",
-        }
-    ]
+    assert repository.retry_marked == []
+    assert len(repository.cooldowns) == 1
+    assert repository.cooldowns[0]["task_uuid"] == "arb-open-4"
+    assert repository.cooldowns[0]["failure_reason"] == "REPAIR_FAILED"
     assert repository.repair_results == []
 
 
@@ -5949,6 +5951,7 @@ async def test_arbitrage_execution_consumer_emits_retry_scheduled_event_after_re
                     "execution_status": "FAILED",
                     "filled_exchanges": [],
                     "failed_exchanges": ["binance", "okx"],
+                    "reason": "connection timeout while placing order",
                 },
             )()
         ),
@@ -5977,7 +5980,7 @@ async def test_arbitrage_execution_consumer_emits_retry_scheduled_event_after_re
     assert event.service == "arb_executor"
     assert event.level == "INFO"
     assert event.payload["task_uuid"] == "arb-close-retry-evt"
-    assert event.payload["failure_reason"] == "execution_failed_non_repairable"
+    assert event.payload["failure_reason"] == "TRANSIENT_NETWORK"
     assert event.payload["retry_count"] == 1
     assert event.payload["max_retry_count"] == 2
     assert event.payload["auto_recovery_status"] == "RETRY_PENDING"
@@ -6019,6 +6022,7 @@ async def test_arbitrage_execution_consumer_emits_cooldown_started_event_after_c
                     "execution_status": "FAILED",
                     "filled_exchanges": [],
                     "failed_exchanges": ["binance", "okx"],
+                    "reason": "order rejected because reduce-only is required",
                 },
             )()
         ),
@@ -6047,7 +6051,7 @@ async def test_arbitrage_execution_consumer_emits_cooldown_started_event_after_c
     assert event.service == "arb_executor"
     assert event.level == "INFO"
     assert event.payload["task_uuid"] == "arb-close-cooldown-evt"
-    assert event.payload["failure_reason"] == "execution_failed_non_repairable"
+    assert event.payload["failure_reason"] == "EXCHANGE_REJECTED"
     assert event.payload["retry_count"] == 2
     assert event.payload["max_retry_count"] == 2
     assert event.payload["auto_recovery_status"] == "COOLDOWN"
@@ -6118,7 +6122,7 @@ async def test_arbitrage_execution_consumer_emits_exhausted_event_after_exhauste
     assert event.service == "arb_executor"
     assert event.level == "ERROR"
     assert event.payload["task_uuid"] == "arb-close-exhausted-evt"
-    assert event.payload["failure_reason"] == "execution_failed_non_repairable"
+    assert event.payload["failure_reason"] == "UNKNOWN_HARD_FAILURE"
     assert event.payload["retry_count"] == 2
     assert event.payload["max_retry_count"] == 2
     assert event.payload["auto_recovery_status"] == "EXHAUSTED"
@@ -6126,7 +6130,7 @@ async def test_arbitrage_execution_consumer_emits_exhausted_event_after_exhauste
 
 
 @pytest.mark.asyncio
-async def test_arbitrage_execution_consumer_emits_retry_scheduled_event_for_failed_repair():
+async def test_arbitrage_execution_consumer_emits_cooldown_started_event_for_failed_repair():
     repository = FakeTaskRepository(task_uuid="arb-open-repair-retry-evt")
     task = type(
         "Task",
@@ -6197,11 +6201,189 @@ async def test_arbitrage_execution_consumer_emits_retry_scheduled_event_for_fail
     )
 
     assert processed == 1
-    event = _find_event(router.events, "arb.recovery.retry_scheduled")
+    event = _find_event(router.events, "arb.recovery.cooldown_started")
     assert event.payload["task_uuid"] == "arb-open-repair-retry-evt"
-    assert event.payload["failure_reason"] == "repair_failed_manual_required"
-    assert event.payload["auto_recovery_status"] == "RETRY_PENDING"
-    assert event.payload["next_action"] == "RETRY_PENDING"
+    assert event.payload["failure_reason"] == "REPAIR_FAILED"
+    assert event.payload["auto_recovery_status"] == "COOLDOWN"
+    assert event.payload["next_action"] == "COOLDOWN"
+
+
+def test_decide_arbitrage_recovery_returns_retry_pending_for_transient_network():
+    task = type(
+        "Task",
+        (),
+        {"retry_count": 0, "max_retry_count": 2, "auto_recovery_status": "NONE"},
+    )()
+
+    decision = _decide_arbitrage_recovery(
+        task=task,
+        failure_category="TRANSIENT_NETWORK",
+        failure_reason="connection timeout while placing order",
+        now=datetime(2026, 5, 26, 10, 0, 0),
+    )
+
+    assert decision.action == "RETRY_PENDING"
+    assert decision.failure_reason == "TRANSIENT_NETWORK"
+    assert decision.cooldown_until is None
+
+
+def test_decide_arbitrage_recovery_returns_cooldown_for_exchange_rejected_with_scaled_window():
+    task = type(
+        "Task",
+        (),
+        {"retry_count": 1, "max_retry_count": 3, "auto_recovery_status": "NONE"},
+    )()
+
+    base_time = datetime(2026, 5, 26, 10, 0, 0)
+    decision = _decide_arbitrage_recovery(
+        task=task,
+        failure_category="EXCHANGE_REJECTED",
+        failure_reason="order rejected because reduce-only is required",
+        now=base_time,
+    )
+
+    assert decision.action == "COOLDOWN"
+    assert decision.failure_reason == "EXCHANGE_REJECTED"
+    assert decision.cooldown_until == base_time + timedelta(seconds=600)
+
+
+def test_decide_arbitrage_recovery_returns_exhausted_for_unknown_hard_failure():
+    task = type(
+        "Task",
+        (),
+        {"retry_count": 0, "max_retry_count": 2, "auto_recovery_status": "NONE"},
+    )()
+
+    decision = _decide_arbitrage_recovery(
+        task=task,
+        failure_category="UNKNOWN_HARD_FAILURE",
+        failure_reason="unclassified fatal state",
+        now=datetime(2026, 5, 26, 10, 0, 0),
+    )
+
+    assert decision.action == "EXHAUSTED"
+    assert decision.failure_reason == "UNKNOWN_HARD_FAILURE"
+
+
+@pytest.mark.asyncio
+async def test_arbitrage_execution_consumer_routes_timeout_failure_to_retry_pending():
+    repository = FakeTaskRepository(task_uuid="arb-close-net-1")
+    task = type(
+        "Task",
+        (),
+        {
+            "task_uuid": "arb-close-net-1",
+            "user_id": 42,
+            "task_type": "close",
+            "symbol": "BTC/USDT",
+            "spot_exchange": "binance",
+            "derivative_exchange": "okx",
+            "target_notional": 100.0,
+            "retry_count": 0,
+            "max_retry_count": 2,
+            "auto_recovery_status": "NONE",
+        },
+    )()
+    repository.executable_tasks = [task]
+    consumer = ArbitrageExecutionTaskConsumer(
+        task_repository=repository,
+        execution_adapter=ArbitrageExecutionAdapterStub(
+            result=type(
+                "ExecutionSummary",
+                (),
+                {
+                    "ok": False,
+                    "execution_status": "FAILED",
+                    "filled_exchanges": [],
+                    "failed_exchanges": ["binance", "okx"],
+                    "reason": "connection timeout while placing order",
+                },
+            )()
+        ),
+        repair_service=FakeRepairExecutionService(result=None),
+        account_repository=FakeAccountRepository(
+            {
+                "42": [
+                    FakeExchangeAccount(account_id=11, exchange="binance"),
+                    FakeExchangeAccount(account_id=12, exchange="okx"),
+                ]
+            }
+        ),
+        worker_node_id="node-a",
+        env_mode="testnet",
+    )
+
+    processed = await consumer.run_once(
+        credentials_by_exchange={"binance": object(), "okx": object()},
+        proxies_by_exchange={"binance": {}, "okx": {}},
+    )
+
+    assert processed == 1
+    assert repository.retry_marked == [
+        {"task_uuid": "arb-close-net-1", "failure_reason": "TRANSIENT_NETWORK"}
+    ]
+    assert repository.cooldowns == []
+    assert repository.exhausted == []
+
+
+@pytest.mark.asyncio
+async def test_arbitrage_execution_consumer_routes_exchange_rejected_to_cooldown():
+    repository = FakeTaskRepository(task_uuid="arb-close-reject-1")
+    task = type(
+        "Task",
+        (),
+        {
+            "task_uuid": "arb-close-reject-1",
+            "user_id": 42,
+            "task_type": "close",
+            "symbol": "BTC/USDT",
+            "spot_exchange": "binance",
+            "derivative_exchange": "okx",
+            "target_notional": 100.0,
+            "retry_count": 0,
+            "max_retry_count": 2,
+            "auto_recovery_status": "NONE",
+        },
+    )()
+    repository.executable_tasks = [task]
+    consumer = ArbitrageExecutionTaskConsumer(
+        task_repository=repository,
+        execution_adapter=ArbitrageExecutionAdapterStub(
+            result=type(
+                "ExecutionSummary",
+                (),
+                {
+                    "ok": False,
+                    "execution_status": "FAILED",
+                    "filled_exchanges": [],
+                    "failed_exchanges": ["binance", "okx"],
+                    "reason": "order rejected because reduce-only is required",
+                },
+            )()
+        ),
+        repair_service=FakeRepairExecutionService(result=None),
+        account_repository=FakeAccountRepository(
+            {
+                "42": [
+                    FakeExchangeAccount(account_id=11, exchange="binance"),
+                    FakeExchangeAccount(account_id=12, exchange="okx"),
+                ]
+            }
+        ),
+        worker_node_id="node-a",
+        env_mode="testnet",
+    )
+
+    processed = await consumer.run_once(
+        credentials_by_exchange={"binance": object(), "okx": object()},
+        proxies_by_exchange={"binance": {}, "okx": {}},
+    )
+
+    assert processed == 1
+    assert repository.retry_marked == []
+    assert len(repository.cooldowns) == 1
+    assert repository.cooldowns[0]["task_uuid"] == "arb-close-reject-1"
+    assert repository.cooldowns[0]["failure_reason"] == "EXCHANGE_REJECTED"
 
 
 def test_classify_arbitrage_failure_returns_transient_network_for_timeout_text():
