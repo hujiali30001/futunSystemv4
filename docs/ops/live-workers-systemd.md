@@ -706,6 +706,50 @@ canary 不关心的账户真值阻塞，只验证真实 systemd 服务之间的 
 - 为了把范围收敛在“真实 systemd 双服务联动”本身，这轮采用临时 monkeypatch 绕过非目标阻塞
 - 验证脚本最终已完成 cleanup 复核：远端 `sitecustomize.py` 被删除，`.env.worker` 中 `FURUN_CANARY_*` 键已清除
 
+### Executor Canary Alert Remediation
+
+如果飞书持续出现下面这组告警：
+
+- `executor.task.failed`
+- `error = task not found: repair-systemd-canary-1`
+
+优先判断这是不是远端 `repair worker systemd` canary 的历史消息被 `executor`
+重启后再次重读，而不是正常业务任务失败。
+
+本次排障结论：
+
+- `executor` 当前 Redis stream 消费模型启动时会从 `last_id = "0-0"` 开始扫描
+- 如果真实 `stream:spot_exec_tasks:main` 残留旧的 `repair-systemd-canary-1`，服务重启后会再次处理
+- 如果数据库 `arbitrage_tasks` 中对应任务真值已删，最终会落成 `task not found: repair-systemd-canary-1`
+
+本次止血动作：
+
+- 清理 `arbitrage_tasks` 中的 `repair-systemd-canary-1`
+- 清理真实 `stream:spot_exec_tasks:main` 中该 canary 的历史消息
+- 清理真实 `stream:repair_tasks:main` 中该 canary 的历史消息
+- 同时清理 `stream:spot_exec_tasks:repair-canary` 与 `stream:repair_tasks:repair-canary` 中同名 canary 残留，确保 cleanup 可幂等复跑
+
+后续远端 `repair worker systemd` canary 隔离规则：
+
+- 临时覆盖 `.env.worker` 中的 `EXECUTOR_STREAM_KEY=stream:spot_exec_tasks:repair-canary`
+- 临时覆盖 `.env.worker` 中的 `REPAIR_STREAM_KEY=stream:repair_tasks:repair-canary`
+- canary 期间使用 `WORKER_REGION=repair-canary` 与 `NODE_ID=repair-canary`，避免与真实 `main` 节点语义混用
+- canary 注入只能写入 `stream:spot_exec_tasks:repair-canary`
+- canary 结束后必须恢复原始 `.env.worker`，并重启 `furun-spot-executor.service`、`furun-spot-repair.service`
+
+验收点：
+
+- 重启 `furun-spot-executor.service` 后，不再新增 `task not found: repair-systemd-canary-1`
+- 输出结果中的 `executor_stream_key` 固定为 `stream:spot_exec_tasks:repair-canary`
+- 输出结果中的 `repair_stream_key` 固定为 `stream:repair_tasks:repair-canary`
+- cleanup 后，`post_cleanup_main_executor` 与 `post_cleanup_main_repair` 不再包含 `repair-systemd-canary-1`
+- cleanup 后，`post_cleanup_canary_executor` 与 `post_cleanup_canary_repair` 不再残留本次 canary
+- `executor_silence_logs` 为空，或至少不再出现 cleanup 之后新增的同名错误
+
+如果后续再次出现同类飞书噪声，先检查是否有新的远端验证脚本重新向 `main`
+stream 写入 `repair-systemd-canary-1`，再判断是否需要再次执行 cleanup；不要先把它当作
+普通业务任务失败处理。
+
 ### Executor Execution Result Event Validation
 
 `executor.execution_result` 远端闭环采用主服务器 helper 模式验证，不依赖
