@@ -1290,7 +1290,7 @@ async def test_arbitrage_dispatcher_creates_open_task_record_from_opportunity():
 
 
 @pytest.mark.asyncio
-async def test_arbitrage_dispatcher_uses_db_discovered_users_for_open_opportunity():
+async def test_arbitrage_dispatcher_emits_user_discovered_and_task_created_events():
     redis_client = FakeRedis(
         xread_messages=[
             (
@@ -1319,6 +1319,7 @@ async def test_arbitrage_dispatcher_uses_db_discovered_users_for_open_opportunit
     redis_client.route_values = {"route:user_node:42": "node-a"}
     repository = FakeArbitrageDispatchRepository(task_uuid="arb-open-1")
     repository.generated_task_uuids = ["arb-open-1"]
+    router = FakeEventRouter()
     dispatcher = RedisArbitrageTaskDispatcher(
         redis_client=redis_client,
         user_ids=[],
@@ -1330,16 +1331,27 @@ async def test_arbitrage_dispatcher_uses_db_discovered_users_for_open_opportunit
         ),
         stream_key="stream:opportunities",
         block_ms=0,
+        event_router=router,
+        region="node-a",
     )
 
     processed = await dispatcher.run(max_iterations=1)
 
     assert processed == 1
     assert [item.user_id for item in repository.created] == [42]
+    discovered = _find_event(router.events, "arb.dispatcher.user_discovered")
+    created = _find_event(router.events, "arb.dispatcher.task_created")
+    assert discovered.service == "arb_dispatcher"
+    assert discovered.region == "node-a"
+    assert discovered.payload["user_id"] == "42"
+    assert discovered.payload["source_message_id"] == "1-0"
+    assert created.payload["task_uuid"] == "arb-open-1"
+    assert created.payload["strategy_config_id"] == "11"
+    assert created.payload["worker_node_id"] == "node-a"
 
 
 @pytest.mark.asyncio
-async def test_arbitrage_dispatcher_skips_open_when_exchange_coverage_is_missing():
+async def test_arbitrage_dispatcher_emits_task_skipped_event_for_missing_account_coverage():
     redis_client = FakeRedis(
         xread_messages=[
             (
@@ -1367,6 +1379,7 @@ async def test_arbitrage_dispatcher_skips_open_when_exchange_coverage_is_missing
     )
     redis_client.route_values = {"route:user_node:42": "node-a"}
     repository = FakeArbitrageDispatchRepository(task_uuid="arb-open-1")
+    router = FakeEventRouter()
     dispatcher = RedisArbitrageTaskDispatcher(
         redis_client=redis_client,
         user_ids=["42"],
@@ -1380,11 +1393,17 @@ async def test_arbitrage_dispatcher_skips_open_when_exchange_coverage_is_missing
         ),
         stream_key="stream:opportunities",
         block_ms=0,
+        event_router=router,
+        region="node-a",
     )
 
     processed = await dispatcher.run(max_iterations=1)
 
     assert processed == 1
+    skipped = _find_event(router.events, "arb.dispatcher.task_skipped")
+    assert skipped.payload["user_id"] == "42"
+    assert skipped.payload["symbol"] == "BTC/USDT"
+    assert skipped.payload["skip_reason"] == "account_coverage_missing"
     assert repository.created == []
 
 
@@ -5431,3 +5450,197 @@ async def test_arbitrage_execution_consumer_marks_failed_for_non_repairable_resu
         )
     ]
     assert repository.repair_results == []
+
+
+@pytest.mark.asyncio
+async def test_arbitrage_execution_consumer_emits_execution_result_event_for_success():
+    repository = FakeTaskRepository(task_uuid="arb-open-evt-1")
+    task = type(
+        "Task",
+        (),
+        {
+            "task_uuid": "arb-open-evt-1",
+            "user_id": 42,
+            "task_type": "open",
+            "symbol": "BTC/USDT",
+            "spot_exchange": "binance",
+            "derivative_exchange": "okx",
+            "target_notional": 100.0,
+        },
+    )()
+    repository.executable_tasks = [task]
+    router = FakeEventRouter()
+    consumer = ArbitrageExecutionTaskConsumer(
+        task_repository=repository,
+        execution_adapter=ArbitrageExecutionAdapterStub(
+            result=type(
+                "ExecutionSummary",
+                (),
+                {
+                    "ok": True,
+                    "execution_status": "OPEN_HEDGED",
+                    "filled_exchanges": ["binance", "okx"],
+                    "failed_exchanges": [],
+                },
+            )()
+        ),
+        repair_service=FakeRepairExecutionService(result=None),
+        account_repository=FakeAccountRepository(
+            {
+                "42": [
+                    FakeExchangeAccount(account_id=11, exchange="binance"),
+                    FakeExchangeAccount(account_id=12, exchange="okx"),
+                ]
+            }
+        ),
+        worker_node_id="node-a",
+        env_mode="testnet",
+        event_router=router,
+        region="node-a",
+    )
+
+    processed = await consumer.run_once(
+        credentials_by_exchange={"binance": object(), "okx": object()},
+        proxies_by_exchange={"binance": {}, "okx": {}},
+    )
+
+    assert processed == 1
+    event = _find_event(router.events, "arb.executor.execution_result")
+    assert event.service == "arb_executor"
+    assert event.region == "node-a"
+    assert event.payload["task_uuid"] == "arb-open-evt-1"
+    assert event.payload["task_type"] == "open"
+    assert event.payload["execution_status"] == "OPEN_HEDGED"
+
+
+@pytest.mark.asyncio
+async def test_arbitrage_execution_consumer_emits_repair_planned_and_repair_finished_events():
+    repository = FakeTaskRepository(task_uuid="arb-open-evt-2")
+    task = type(
+        "Task",
+        (),
+        {
+            "task_uuid": "arb-open-evt-2",
+            "user_id": 42,
+            "task_type": "open",
+            "symbol": "BTC/USDT",
+            "spot_exchange": "binance",
+            "derivative_exchange": "okx",
+            "target_notional": 100.0,
+        },
+    )()
+    repository.executable_tasks = [task]
+    router = FakeEventRouter()
+    consumer = ArbitrageExecutionTaskConsumer(
+        task_repository=repository,
+        execution_adapter=ArbitrageExecutionAdapterStub(
+            result=type(
+                "ExecutionSummary",
+                (),
+                {
+                    "ok": False,
+                    "execution_status": "OPEN_PARTIAL",
+                    "filled_exchanges": ["binance"],
+                    "failed_exchanges": ["okx"],
+                },
+            )()
+        ),
+        repair_service=FakeRepairExecutionService(
+            result=type(
+                "RepairResult",
+                (),
+                {
+                    "ok": True,
+                    "status": "REPAIRED",
+                    "target_exchanges": ["okx"],
+                    "repaired_exchanges": ["okx"],
+                    "remaining_failed_exchanges": [],
+                    "reason": None,
+                },
+            )()
+        ),
+        account_repository=FakeAccountRepository(
+            {
+                "42": [
+                    FakeExchangeAccount(account_id=11, exchange="binance"),
+                    FakeExchangeAccount(account_id=12, exchange="okx"),
+                ]
+            }
+        ),
+        worker_node_id="node-a",
+        env_mode="testnet",
+        event_router=router,
+        region="node-a",
+    )
+
+    processed = await consumer.run_once(
+        credentials_by_exchange={"binance": object(), "okx": object()},
+        proxies_by_exchange={"binance": {}, "okx": {}},
+    )
+
+    assert processed == 1
+    repair_planned = _find_event(router.events, "arb.executor.repair_planned")
+    repair_finished = _find_event(router.events, "arb.repair.finished")
+    assert repair_planned.payload["repair_action"] == "AUTO_HEDGE_REPAIRING"
+    assert repair_finished.level == "INFO"
+    assert repair_finished.payload["status"] == "REPAIRED"
+
+
+@pytest.mark.asyncio
+async def test_arbitrage_execution_consumer_emits_task_failed_event_for_non_repairable_failure():
+    repository = FakeTaskRepository(task_uuid="arb-close-evt-1")
+    task = type(
+        "Task",
+        (),
+        {
+            "task_uuid": "arb-close-evt-1",
+            "user_id": 42,
+            "task_type": "close",
+            "symbol": "BTC/USDT",
+            "spot_exchange": "binance",
+            "derivative_exchange": "okx",
+            "target_notional": 100.0,
+        },
+    )()
+    repository.executable_tasks = [task]
+    router = FakeEventRouter()
+    consumer = ArbitrageExecutionTaskConsumer(
+        task_repository=repository,
+        execution_adapter=ArbitrageExecutionAdapterStub(
+            result=type(
+                "ExecutionSummary",
+                (),
+                {
+                    "ok": False,
+                    "execution_status": "FAILED",
+                    "filled_exchanges": [],
+                    "failed_exchanges": ["binance", "okx"],
+                },
+            )()
+        ),
+        repair_service=FakeRepairExecutionService(result=None),
+        account_repository=FakeAccountRepository(
+            {
+                "42": [
+                    FakeExchangeAccount(account_id=11, exchange="binance"),
+                    FakeExchangeAccount(account_id=12, exchange="okx"),
+                ]
+            }
+        ),
+        worker_node_id="node-a",
+        env_mode="testnet",
+        event_router=router,
+        region="node-a",
+    )
+
+    processed = await consumer.run_once(
+        credentials_by_exchange={"binance": object(), "okx": object()},
+        proxies_by_exchange={"binance": {}, "okx": {}},
+    )
+
+    assert processed == 1
+    failed_event = _find_event(router.events, "arb.executor.task_failed")
+    assert failed_event.level == "ERROR"
+    assert failed_event.payload["task_uuid"] == "arb-close-evt-1"
+    assert failed_event.payload["failed_exchanges"] == ["binance", "okx"]
+    assert failed_event.payload["error"] == "FAILED"

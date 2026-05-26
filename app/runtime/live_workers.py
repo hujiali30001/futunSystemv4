@@ -258,6 +258,214 @@ def _build_repair_finished_event(
     )
 
 
+def _build_arb_executor_execution_result_event(
+    *,
+    region: str,
+    task,
+    result: Any,
+) -> RuntimeEvent:
+    return RuntimeEvent(
+        event_type="arb.executor.execution_result",
+        level="INFO",
+        service="arb_executor",
+        region=region,
+        symbol=str(task.symbol),
+        exchange=str(task.spot_exchange),
+        exchanges=[str(task.spot_exchange), str(task.derivative_exchange)],
+        message="arbitrage executor execution result",
+        payload={
+            "task_uuid": str(task.task_uuid),
+            "user_id": str(task.user_id),
+            "symbol": str(task.symbol),
+            "task_type": str(task.task_type),
+            "spot_exchange": str(task.spot_exchange),
+            "derivative_exchange": str(task.derivative_exchange),
+            "execution_status": getattr(result, "execution_status", None),
+            "filled_exchanges": list(getattr(result, "filled_exchanges", []) or []),
+            "failed_exchanges": list(getattr(result, "failed_exchanges", []) or []),
+        },
+    )
+
+
+def _build_arb_executor_repair_planned_event(
+    *,
+    region: str,
+    task,
+    execution_status: str,
+    filled_exchanges: list[str],
+    failed_exchanges: list[str],
+    repair_plan: RepairPlan,
+) -> RuntimeEvent:
+    return RuntimeEvent(
+        event_type="arb.executor.repair_planned",
+        level="INFO",
+        service="arb_executor",
+        region=region,
+        symbol=str(task.symbol),
+        exchange=str(task.spot_exchange),
+        exchanges=[str(task.spot_exchange), str(task.derivative_exchange)],
+        message="arbitrage executor repair planned",
+        payload={
+            "task_uuid": str(task.task_uuid),
+            "symbol": str(task.symbol),
+            "task_type": str(task.task_type),
+            "execution_status": execution_status,
+            "filled_exchanges": list(filled_exchanges),
+            "failed_exchanges": list(failed_exchanges),
+            "repair_action": repair_plan.action,
+            "repair_reason": repair_plan.reason,
+            "target_exchanges": list(failed_exchanges),
+        },
+    )
+
+
+def _build_arb_executor_task_failed_event(
+    *,
+    region: str,
+    task,
+    result: Any,
+) -> RuntimeEvent:
+    return RuntimeEvent(
+        event_type="arb.executor.task_failed",
+        level="ERROR",
+        service="arb_executor",
+        region=region,
+        symbol=str(task.symbol),
+        exchange=str(task.spot_exchange),
+        exchanges=[str(task.spot_exchange), str(task.derivative_exchange)],
+        message="arbitrage executor task failed",
+        payload={
+            "task_uuid": str(task.task_uuid),
+            "user_id": str(task.user_id),
+            "symbol": str(task.symbol),
+            "task_type": str(task.task_type),
+            "error": str(getattr(result, "execution_status", "FAILED") or "FAILED"),
+            "failed_exchanges": list(getattr(result, "failed_exchanges", []) or []),
+        },
+    )
+
+
+def _build_arb_repair_finished_event(
+    *,
+    region: str,
+    task,
+    result: Any,
+) -> RuntimeEvent:
+    return RuntimeEvent(
+        event_type="arb.repair.finished",
+        level="INFO" if getattr(result, "ok", False) else "ERROR",
+        service="arb_repair",
+        region=region,
+        symbol=str(task.symbol),
+        exchange=str(task.spot_exchange),
+        exchanges=[str(task.spot_exchange), str(task.derivative_exchange)],
+        message="arbitrage repair finished",
+        payload={
+            "task_uuid": str(task.task_uuid),
+            "symbol": str(task.symbol),
+            "task_type": str(task.task_type),
+            "status": getattr(result, "status", None),
+            "repaired_exchanges": list(getattr(result, "repaired_exchanges", []) or []),
+            "remaining_failed_exchanges": list(
+                getattr(result, "remaining_failed_exchanges", []) or []
+            ),
+            "reason": getattr(result, "reason", None),
+        },
+    )
+
+
+def _build_arb_dispatcher_user_discovered_event(
+    *,
+    region: str,
+    payload: dict[str, object],
+    user_id: str,
+) -> RuntimeEvent:
+    return RuntimeEvent(
+        event_type="arb.dispatcher.user_discovered",
+        level="INFO",
+        service="arb_dispatcher",
+        region=region,
+        symbol=str(payload["symbol"]) if payload.get("symbol") is not None else None,
+        exchange=(
+            str(payload["spot_exchange"])
+            if payload.get("spot_exchange") is not None
+            else None
+        ),
+        exchanges=[
+            str(payload["spot_exchange"]),
+            str(payload["derivative_exchange"]),
+        ],
+        message="arbitrage dispatcher user discovered",
+        payload={
+            "user_id": str(user_id),
+            "symbol": str(payload["symbol"]),
+            "opportunity_type": str(payload["opportunity_type"]),
+            "spot_exchange": str(payload["spot_exchange"]),
+            "derivative_exchange": str(payload["derivative_exchange"]),
+            "source_message_id": str(payload["source_message_id"]),
+        },
+    )
+
+
+def _build_arb_dispatcher_task_created_event(
+    *,
+    region: str,
+    payload: dict[str, object],
+    user_id: str,
+    worker_node_id: str,
+    task_record,
+    strategy,
+) -> RuntimeEvent:
+    return RuntimeEvent(
+        event_type="arb.dispatcher.task_created",
+        level="INFO",
+        service="arb_dispatcher",
+        region=region,
+        symbol=str(payload["symbol"]),
+        exchange=str(payload["spot_exchange"]),
+        exchanges=[str(payload["spot_exchange"]), str(payload["derivative_exchange"])],
+        message="arbitrage dispatcher task created",
+        payload={
+            "task_uuid": str(task_record.task_uuid),
+            "user_id": str(user_id),
+            "strategy_config_id": (
+                None if strategy is None else str(getattr(strategy, "id", None))
+            ),
+            "symbol": str(payload["symbol"]),
+            "opportunity_type": str(payload["opportunity_type"]),
+            "spot_exchange": str(payload["spot_exchange"]),
+            "derivative_exchange": str(payload["derivative_exchange"]),
+            "worker_node_id": str(worker_node_id),
+        },
+    )
+
+
+def _build_arb_dispatcher_task_skipped_event(
+    *,
+    region: str,
+    payload: dict[str, object],
+    user_id: str,
+    skip_reason: str,
+) -> RuntimeEvent:
+    return RuntimeEvent(
+        event_type="arb.dispatcher.task_skipped",
+        level="INFO",
+        service="arb_dispatcher",
+        region=region,
+        symbol=str(payload["symbol"]),
+        exchange=str(payload["spot_exchange"]),
+        exchanges=[str(payload["spot_exchange"]), str(payload["derivative_exchange"])],
+        message="arbitrage dispatcher task skipped",
+        payload={
+            "user_id": str(user_id),
+            "symbol": str(payload["symbol"]),
+            "opportunity_type": str(payload["opportunity_type"]),
+            "skip_reason": skip_reason,
+            "source_message_id": str(payload["source_message_id"]),
+        },
+    )
+
+
 def _parse_market_type_scope(raw_value: Any) -> set[str]:
     if raw_value is None:
         return set()
@@ -554,6 +762,8 @@ class ArbitrageExecutionTaskConsumer:
         worker_node_id: str,
         env_mode: str = "testnet",
         risk_manager: RiskManager | None = None,
+        event_router=None,
+        region: str | None = None,
     ) -> None:
         self.task_repository = task_repository
         self.execution_adapter = execution_adapter
@@ -562,6 +772,8 @@ class ArbitrageExecutionTaskConsumer:
         self.worker_node_id = worker_node_id
         self.env_mode = env_mode
         self.risk_manager = risk_manager or RiskManager()
+        self.event_router = event_router
+        self.region = region or worker_node_id
 
     def _resolve_execution_exchanges(self, task) -> tuple[str, str]:
         task_type = str(getattr(task, "task_type", "")).lower()
@@ -617,6 +829,17 @@ class ArbitrageExecutionTaskConsumer:
                 failed_exchanges=failed_exchanges,
             )
         )
+        if self.event_router is not None:
+            await self.event_router.dispatch(
+                _build_arb_executor_repair_planned_event(
+                    region=self.region,
+                    task=task,
+                    execution_status=str(getattr(result, "execution_status", "") or ""),
+                    filled_exchanges=filled_exchanges,
+                    failed_exchanges=failed_exchanges,
+                    repair_plan=repair_plan,
+                )
+            )
         repair_result = await self.repair_service.run_task(
             task_uuid=str(task.task_uuid),
             symbol=str(task.symbol),
@@ -642,6 +865,14 @@ class ArbitrageExecutionTaskConsumer:
                 repair_reason="repair_succeeded",
                 status_reason=None,
             )
+            if self.event_router is not None:
+                await self.event_router.dispatch(
+                    _build_arb_repair_finished_event(
+                        region=self.region,
+                        task=task,
+                        result=repair_result,
+                    )
+                )
             return
 
         remaining_failed_exchanges = list(
@@ -661,6 +892,14 @@ class ArbitrageExecutionTaskConsumer:
             repair_reason=repair_plan.reason,
             status_reason="manual_required",
         )
+        if self.event_router is not None:
+            await self.event_router.dispatch(
+                _build_arb_repair_finished_event(
+                    region=self.region,
+                    task=task,
+                    result=repair_result,
+                )
+            )
 
     async def run_once(
         self,
@@ -683,6 +922,17 @@ class ArbitrageExecutionTaskConsumer:
                 env_mode=self.env_mode,
                 proxies_by_exchange=proxies_by_exchange,
             )
+            if (
+                self.event_router is not None
+                and getattr(result, "execution_status", None) is not None
+            ):
+                await self.event_router.dispatch(
+                    _build_arb_executor_execution_result_event(
+                        region=self.region,
+                        task=task,
+                        result=result,
+                    )
+                )
             execution_status = str(
                 getattr(result, "execution_status", "FAILED") or "FAILED"
             )
@@ -714,6 +964,14 @@ class ArbitrageExecutionTaskConsumer:
                     proxies_by_exchange=proxies_by_exchange,
                 )
                 return 1
+            if self.event_router is not None:
+                await self.event_router.dispatch(
+                    _build_arb_executor_task_failed_event(
+                        region=self.region,
+                        task=task,
+                        result=result,
+                    )
+                )
             self.task_repository.mark_execution_result(
                 str(task.task_uuid),
                 lifecycle_status="FAILED",
@@ -987,6 +1245,7 @@ class RedisArbitrageTaskDispatcher:
         account_repository=None,
         stream_key: str,
         block_ms: int = 1000,
+        event_router=None,
         region: str = "default",
         env_mode: str = "testnet",
     ) -> None:
@@ -999,6 +1258,7 @@ class RedisArbitrageTaskDispatcher:
         self.account_repository = account_repository
         self.stream_key = stream_key
         self.block_ms = block_ms
+        self.event_router = event_router
         self.region = region
         self.env_mode = env_mode
         self.last_id = "0-0"
@@ -1131,17 +1391,45 @@ class RedisArbitrageTaskDispatcher:
                     for user_id in self._resolve_candidate_user_ids():
                         node_id = await self.route_resolver.get_user_node(user_id)
                         if node_id is None:
+                            if self.event_router is not None:
+                                await self.event_router.dispatch(
+                                    _build_arb_dispatcher_task_skipped_event(
+                                        region=self.region,
+                                        payload=effective_payload,
+                                        user_id=user_id,
+                                        skip_reason="route_unavailable",
+                                    )
+                                )
                             continue
+                        if self.event_router is not None:
+                            await self.event_router.dispatch(
+                                _build_arb_dispatcher_user_discovered_event(
+                                    region=self.region,
+                                    payload=effective_payload,
+                                    user_id=user_id,
+                                )
+                            )
                         accounts = self._load_user_accounts(user_id=user_id)
                         if not self._has_required_account_coverage(
                             payload=effective_payload,
                             accounts=accounts,
                         ):
+                            if self.event_router is not None:
+                                await self.event_router.dispatch(
+                                    _build_arb_dispatcher_task_skipped_event(
+                                        region=self.region,
+                                        payload=effective_payload,
+                                        user_id=user_id,
+                                        skip_reason="account_coverage_missing",
+                                    )
+                                )
                             continue
+                        matched_any = False
                         for strategy in self._iter_matching_strategies(
                             user_id=user_id,
                             payload=effective_payload,
                         ):
+                            matched_any = True
                             if str(effective_payload["opportunity_type"]) == "CLOSE":
                                 if self.task_repository is None:
                                     continue
@@ -1155,12 +1443,41 @@ class RedisArbitrageTaskDispatcher:
                                     env_mode=self.env_mode,
                                 )
                                 if closeable is None:
+                                    if self.event_router is not None:
+                                        await self.event_router.dispatch(
+                                            _build_arb_dispatcher_task_skipped_event(
+                                                region=self.region,
+                                                payload=effective_payload,
+                                                user_id=user_id,
+                                                skip_reason="close_context_missing",
+                                            )
+                                        )
                                     continue
-                            self._create_arbitrage_task(
+                            task_record = self._create_arbitrage_task(
                                 user_id=user_id,
                                 message_id=str(effective_payload["source_message_id"]),
                                 payload=effective_payload,
                                 strategy=strategy,
+                            )
+                            if task_record is not None and self.event_router is not None:
+                                await self.event_router.dispatch(
+                                    _build_arb_dispatcher_task_created_event(
+                                        region=self.region,
+                                        payload=effective_payload,
+                                        user_id=user_id,
+                                        worker_node_id=node_id,
+                                        task_record=task_record,
+                                        strategy=strategy,
+                                    )
+                                )
+                        if not matched_any and self.event_router is not None:
+                            await self.event_router.dispatch(
+                                _build_arb_dispatcher_task_skipped_event(
+                                    region=self.region,
+                                    payload=effective_payload,
+                                    user_id=user_id,
+                                    skip_reason="threshold_not_matched",
+                                )
                             )
                     self.last_id = message_id
                     processed += 1
