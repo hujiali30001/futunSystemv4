@@ -45,15 +45,15 @@ class FakeDispatcher:
     def __init__(self, should_fail=False):
         self.should_fail = should_fail
 
-    async def dispatch(self, payload, *, credentials_by_exchange):
+    async def dispatch(self, payload, *, credentials_by_exchange=None, execution_accounts_by_exchange=None, proxies_by_exchange=None):
         if self.should_fail:
             raise RuntimeError("dispatch failed")
         return {"ok": True}
 
 
 class FakeRedis:
-    async def xread(self, streams, count=1, block=0):
-        return [
+    def __init__(self, xread_messages=None):
+        self.xread_messages = xread_messages or [
             (
                 "stream:spot_opps",
                 [
@@ -69,6 +69,9 @@ class FakeRedis:
                 ],
             )
         ]
+
+    async def xread(self, streams, count=1, block=0):
+        return self.xread_messages
 
 
 @pytest.mark.asyncio
@@ -123,9 +126,29 @@ async def test_consumer_emits_processed_event():
 
 @pytest.mark.asyncio
 async def test_executor_emits_executor_processed_event():
+    redis_client = FakeRedis(
+        xread_messages=[
+            (
+                "stream:spot_exec_tasks:node-a",
+                [
+                    (
+                        "1-0",
+                        {
+                            "task_uuid": "task-1",
+                            "user_id": "42",
+                            "symbol": "BTC/USDT",
+                            "buy_exchange": "bitget",
+                            "sell_exchange": "gate",
+                            "target_quote_amount": "100.0",
+                        },
+                    )
+                ],
+            )
+        ]
+    )
     router = FakeEventRouter()
     consumer = RedisExecutionTaskConsumer(
-        redis_client=FakeRedis(),
+        redis_client=redis_client,
         dispatcher=FakeDispatcher(),
         stream_key="stream:spot_exec_tasks:node-a",
         block_ms=0,
@@ -146,9 +169,29 @@ async def test_executor_emits_executor_processed_event():
 
 @pytest.mark.asyncio
 async def test_executor_emits_executor_failed_event():
+    redis_client = FakeRedis(
+        xread_messages=[
+            (
+                "stream:spot_exec_tasks:node-a",
+                [
+                    (
+                        "1-0",
+                        {
+                            "task_uuid": "task-1",
+                            "user_id": "42",
+                            "symbol": "BTC/USDT",
+                            "buy_exchange": "bitget",
+                            "sell_exchange": "gate",
+                            "target_quote_amount": "100.0",
+                        },
+                    )
+                ],
+            )
+        ]
+    )
     router = FakeEventRouter()
     consumer = RedisExecutionTaskConsumer(
-        redis_client=FakeRedis(),
+        redis_client=redis_client,
         dispatcher=FakeDispatcher(should_fail=True),
         stream_key="stream:spot_exec_tasks:node-a",
         block_ms=0,
