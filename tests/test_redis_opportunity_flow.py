@@ -1,7 +1,8 @@
 import pytest
 
-from app.market.opportunity import SpotOpportunity
+from app.market.opportunity import ArbitrageOpportunity, SpotOpportunity
 from app.runtime.redis_flow import (
+    ArbitrageOpportunityPublisher,
     MarketOpportunityPublisher,
     NodeExecutionTaskPublisher,
     RedisOpportunityDispatcher,
@@ -104,6 +105,105 @@ async def test_publisher_writes_spot_opportunity_to_zset_and_stream():
     assert redis_client.xadds[0][1]["target_quote_amount"] == "100.0"
     assert redis_client.xadds[0][1]["buy_depth_levels_used"] == "2"
     assert redis_client.xadds[0][1]["sell_depth_levels_used"] == "3"
+
+
+@pytest.mark.asyncio
+async def test_arbitrage_publisher_writes_open_opportunity_to_open_zset_and_stream():
+    redis_client = FakeRedis()
+    publisher = ArbitrageOpportunityPublisher(redis_client)
+    opportunity = ArbitrageOpportunity(
+        symbol="BTC/USDT",
+        spot_exchange="binance",
+        derivative_exchange="okx",
+        opportunity_type="OPEN",
+        open_spread_bps=120.5,
+        close_spread_bps=90.25,
+        funding_rate=0.0004,
+        annualized_bps=150.0,
+        redis_member="binance:okx:BTC/USDT:OPEN:1",
+        timestamp=1.0,
+    )
+
+    await publisher.publish(opportunity)
+
+    assert redis_client.zadds[0] == (
+        "arb:zset:open",
+        {"binance:okx:BTC/USDT:OPEN:1": 120.5},
+    )
+    assert redis_client.xadds[0][0] == "stream:opportunities"
+    assert redis_client.xadds[0][1]["opportunity_type"] == "OPEN"
+    assert redis_client.xadds[0][1]["annualized_bps"] == "150.0"
+
+
+@pytest.mark.asyncio
+async def test_arbitrage_publisher_writes_close_opportunity_to_close_zset_and_stream():
+    redis_client = FakeRedis()
+    publisher = ArbitrageOpportunityPublisher(redis_client)
+    opportunity = ArbitrageOpportunity(
+        symbol="BTC/USDT",
+        spot_exchange="binance",
+        derivative_exchange="okx",
+        opportunity_type="CLOSE",
+        open_spread_bps=120.5,
+        close_spread_bps=90.25,
+        funding_rate=0.0004,
+        annualized_bps=150.0,
+        redis_member="binance:okx:BTC/USDT:CLOSE:1",
+        timestamp=1.0,
+    )
+
+    await publisher.publish(opportunity)
+
+    assert redis_client.zadds[0] == (
+        "arb:zset:close",
+        {"binance:okx:BTC/USDT:CLOSE:1": 90.25},
+    )
+    assert redis_client.xadds[0][0] == "stream:opportunities"
+    assert redis_client.xadds[0][1]["opportunity_type"] == "CLOSE"
+
+
+@pytest.mark.asyncio
+async def test_spot_publisher_behavior_stays_unchanged_alongside_arbitrage_publisher():
+    redis_client = FakeRedis()
+    spot_publisher = MarketOpportunityPublisher(
+        redis_client,
+        zset_key="arb:zset:spot",
+        stream_key="stream:spot_opps",
+    )
+    arb_publisher = ArbitrageOpportunityPublisher(redis_client)
+    spot_opportunity = SpotOpportunity(
+        symbol="BTC/USDT",
+        buy_exchange="bitget",
+        sell_exchange="gate",
+        buy_ask=100.0,
+        sell_bid=102.0,
+        spread_bps=200.0,
+        redis_member="bitget:gate:BTC/USDT:1",
+        timestamp=1.0,
+        effective_buy_price=100.5,
+        effective_sell_price=101.5,
+        target_quote_amount=100.0,
+        buy_depth_levels_used=2,
+        sell_depth_levels_used=3,
+    )
+    arb_opportunity = ArbitrageOpportunity(
+        symbol="BTC/USDT",
+        spot_exchange="binance",
+        derivative_exchange="okx",
+        opportunity_type="OPEN",
+        open_spread_bps=120.5,
+        close_spread_bps=90.25,
+        funding_rate=0.0004,
+        annualized_bps=150.0,
+        redis_member="binance:okx:BTC/USDT:OPEN:1",
+        timestamp=1.0,
+    )
+
+    await spot_publisher.publish(spot_opportunity)
+    await arb_publisher.publish(arb_opportunity)
+
+    assert redis_client.xadds[0][0] == "stream:spot_opps"
+    assert redis_client.xadds[1][0] == "stream:opportunities"
 
 
 @pytest.mark.asyncio

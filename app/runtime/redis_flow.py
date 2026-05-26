@@ -1,4 +1,8 @@
-from app.market.opportunity import SpotOpportunity
+from app.market.opportunity import (
+    ArbitrageOpportunity,
+    SpotOpportunity,
+    arbitrage_opportunity_to_payload,
+)
 
 
 class MarketOpportunityPublisher:
@@ -30,6 +34,37 @@ class MarketOpportunityPublisher:
                 "sell_depth_levels_used": str(opportunity.sell_depth_levels_used),
             },
         )
+
+
+class ArbitrageOpportunityPublisher:
+    OPEN_ZSET_KEY = "arb:zset:open"
+    CLOSE_ZSET_KEY = "arb:zset:close"
+    STREAM_KEY = "stream:opportunities"
+
+    def __init__(self, redis_client) -> None:
+        self.redis_client = redis_client
+
+    async def publish(self, opportunity: ArbitrageOpportunity) -> None:
+        zset_key, score = self._zset_target(opportunity)
+        await self.redis_client.zadd(
+            zset_key,
+            {opportunity.redis_member: score},
+        )
+        payload = {
+            key: str(value)
+            for key, value in arbitrage_opportunity_to_payload(opportunity).items()
+        }
+        await self.redis_client.xadd(
+            self.STREAM_KEY,
+            payload,
+        )
+
+    def _zset_target(self, opportunity: ArbitrageOpportunity) -> tuple[str, float]:
+        if opportunity.opportunity_type == "OPEN":
+            return self.OPEN_ZSET_KEY, opportunity.open_spread_bps
+        if opportunity.opportunity_type == "CLOSE":
+            return self.CLOSE_ZSET_KEY, opportunity.close_spread_bps
+        raise ValueError(f"unsupported opportunity_type: {opportunity.opportunity_type}")
 
 
 class UserNodeRouteStore:
