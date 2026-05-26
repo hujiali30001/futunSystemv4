@@ -20,7 +20,7 @@ class WorkerSettings(BaseSettings):
     spot_symbol: str = "BTC/USDT"
     spot_symbols: Annotated[list[str], NoDecode] = Field(default_factory=list)
     spot_exchanges: Annotated[list[str], NoDecode] = Field(
-        default_factory=lambda: ["okx", "bitget", "gate"]
+        default_factory=lambda: ["okx", "binance", "bybit", "bitget", "gate"]
     )
     orderbook_depth_limit: int = 5
     target_quote_amount: float = 100.0
