@@ -25,6 +25,8 @@ class RuntimeTradeExecutionService:
         self,
         *,
         exchanges: list[str],
+        buy_exchange: str | None = None,
+        sell_exchange: str | None = None,
         credentials_by_exchange: dict[str, ExchangeCredentials],
         execution_accounts_by_exchange: dict[str, Any] | None = None,
         symbol: str,
@@ -52,47 +54,51 @@ class RuntimeTradeExecutionService:
                 exchange: await adapters[exchange].fetch_ticker(symbol)
                 for exchange in unique_exchanges
             }
-            buy_exchange = min(unique_exchanges, key=lambda name: tickers[name]["ask"])
-            sell_exchange = max(unique_exchanges, key=lambda name: tickers[name]["bid"])
+            selected_buy_exchange = buy_exchange or min(
+                unique_exchanges, key=lambda name: tickers[name]["ask"]
+            )
+            selected_sell_exchange = sell_exchange or max(
+                unique_exchanges, key=lambda name: tickers[name]["bid"]
+            )
 
-            buy_amount = adapters[buy_exchange].amount_to_precision(
+            buy_amount = adapters[selected_buy_exchange].amount_to_precision(
                 symbol,
                 self._build_safe_amount(
-                    sessions[buy_exchange].markets[symbol],
-                    tickers[buy_exchange],
+                    sessions[selected_buy_exchange].markets[symbol],
+                    tickers[selected_buy_exchange],
                     target_quote_amount=target_quote_amount,
                 ),
             )
-            sell_amount = adapters[sell_exchange].amount_to_precision(
+            sell_amount = adapters[selected_sell_exchange].amount_to_precision(
                 symbol,
                 self._build_safe_amount(
-                    sessions[sell_exchange].markets[symbol],
-                    tickers[sell_exchange],
+                    sessions[selected_sell_exchange].markets[symbol],
+                    tickers[selected_sell_exchange],
                     target_quote_amount=target_quote_amount,
                 ),
             )
-            buy_price = adapters[buy_exchange].price_to_precision(
+            buy_price = adapters[selected_buy_exchange].price_to_precision(
                 symbol,
-                float(tickers[buy_exchange]["bid"]) * 0.95,
+                float(tickers[selected_buy_exchange]["bid"]) * 0.95,
             )
-            sell_price = adapters[sell_exchange].price_to_precision(
+            sell_price = adapters[selected_sell_exchange].price_to_precision(
                 symbol,
-                float(tickers[sell_exchange]["ask"]) * 1.05,
+                float(tickers[selected_sell_exchange]["ask"]) * 1.05,
             )
 
             task = ExecutionTask(
-                task_id=f"{buy_exchange}:{sell_exchange}:{symbol}",
+                task_id=f"{selected_buy_exchange}:{selected_sell_exchange}:{symbol}",
                 symbol=symbol,
                 open_legs=[
                     ExecutionLeg(
-                        exchange=buy_exchange,
+                        exchange=selected_buy_exchange,
                         side="buy",
                         order_type="limit",
                         amount=float(buy_amount),
                         price=float(buy_price),
                     ),
                     ExecutionLeg(
-                        exchange=sell_exchange,
+                        exchange=selected_sell_exchange,
                         side="sell",
                         order_type="limit",
                         amount=float(sell_amount),

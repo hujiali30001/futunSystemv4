@@ -220,6 +220,8 @@ class RedisOpportunityDispatcher:
         target_quote_amount = float(payload.get("target_quote_amount", 15.0))
         return await self.spot_service.run_task(
             exchanges=exchanges,
+            buy_exchange=payload["buy_exchange"],
+            sell_exchange=payload["sell_exchange"],
             credentials_by_exchange=credentials_by_exchange,
             symbol=payload["symbol"],
             target_quote_amount=target_quote_amount,

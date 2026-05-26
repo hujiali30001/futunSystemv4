@@ -519,6 +519,28 @@ class ExecutorPreflightValidator:
                         "executor_preflight_account_exchange_mismatch",
                         f"resolved execution account exchange mismatch for {exchange}",
                     )
+            bound_account_ids_by_exchange = {
+                buy_exchange: payload.get("buy_account_id"),
+                sell_exchange: payload.get("sell_account_id"),
+            }
+            for exchange, bound_account_id in bound_account_ids_by_exchange.items():
+                if bound_account_id is None:
+                    continue
+                resolved_account = execution_accounts_by_exchange.get(exchange)
+                if resolved_account is None:
+                    continue
+                resolved_account_id = (
+                    resolved_account.get("account_id")
+                    if isinstance(resolved_account, dict)
+                    else getattr(resolved_account, "account_id", None)
+                )
+                if resolved_account_id is None:
+                    continue
+                if str(resolved_account_id) != str(bound_account_id):
+                    raise ExecutorPreflightError(
+                        "executor_preflight_account_resolution_failed",
+                        f"resolved execution account id mismatch for {exchange}",
+                    )
 
 
 class ContinuousSpotScanner:

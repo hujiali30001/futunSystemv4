@@ -25,6 +25,7 @@ from app.runtime.redis_flow import (
     RedisOpportunityDispatcher,
     UserNodeRouter,
 )
+from app.runtime.trade_execution_service import RuntimeTradeExecutionService
 
 
 class FakeFlowService:
@@ -824,6 +825,50 @@ def test_executor_preflight_validator_rejects_account_exchange_mismatch():
         )
 
     assert exc_info.value.reason == "executor_preflight_account_exchange_mismatch"
+
+
+def test_executor_preflight_validator_rejects_bound_account_id_mismatch():
+    validator = ExecutorPreflightValidator()
+    buy_account = type(
+        "ResolvedAccount",
+        (),
+        {
+            "account_id": 999,
+            "exchange": "okx",
+            "credentials": "cred-a",
+            "proxies": {},
+        },
+    )()
+    sell_account = type(
+        "ResolvedAccount",
+        (),
+        {
+            "account_id": 202,
+            "exchange": "gate",
+            "credentials": "cred-b",
+            "proxies": {},
+        },
+    )()
+
+    with pytest.raises(ExecutorPreflightError) as exc_info:
+        validator.validate(
+            payload={
+                "task_uuid": "task-1",
+                "user_id": "42",
+                "symbol": "BTC/USDT",
+                "buy_exchange": "okx",
+                "sell_exchange": "gate",
+                "buy_account_id": "101",
+                "sell_account_id": "202",
+                "target_quote_amount": "40.0",
+            },
+            execution_accounts_by_exchange={
+                "okx": buy_account,
+                "gate": sell_account,
+            },
+        )
+
+    assert exc_info.value.reason == "executor_preflight_account_resolution_failed"
 
 
 @pytest.mark.asyncio
@@ -3341,6 +3386,130 @@ async def test_executor_marks_execution_result_with_runtime_trade_execution_serv
 
 
 @pytest.mark.asyncio
+async def test_executor_runtime_trade_execution_service_uses_payload_exchanges_strictly(
+    monkeypatch,
+):
+    class FakeSession:
+        def __init__(self, exchange: str, *, bid: float, ask: float):
+            self.exchange = exchange
+            self.bid = bid
+            self.ask = ask
+            self.markets = {"BTC/USDT": {"limits": {"amount": {"min": 0.001}}}}
+
+        async def mark_ready(self) -> None:
+            return None
+
+    class FakeAdapter:
+        def __init__(self, session):
+            self.session = session
+
+        async def fetch_ticker(self, symbol: str) -> dict[str, float | str]:
+            return {
+                "symbol": symbol,
+                "bid": self.session.bid,
+                "ask": self.session.ask,
+                "last": (self.session.bid + self.session.ask) / 2,
+            }
+
+        def amount_to_precision(self, symbol: str, amount: float) -> float:
+            _ = symbol
+            return round(amount, 6)
+
+        def price_to_precision(self, symbol: str, price: float) -> float:
+            _ = symbol
+            return round(price, 6)
+
+        async def close(self) -> None:
+            return None
+
+    class FakeSessionFactory:
+        def __init__(self):
+            self.configs = {
+                "okx": {"bid": 110.0, "ask": 111.0},
+                "gate": {"bid": 100.0, "ask": 101.0},
+            }
+
+        def create_session(
+            self,
+            *,
+            exchange: str,
+            env_mode: str,
+            proxies: dict,
+            credentials: object,
+        ):
+            _ = env_mode, proxies, credentials
+            return FakeSession(exchange=exchange, **self.configs[exchange])
+
+    captured = {}
+
+    class CapturingTradeExecutor:
+        def __init__(self, *, adapter_factory):
+            _ = adapter_factory
+
+        async def execute_open(self, task):
+            captured["task"] = task
+            return type(
+                "ExecutionSummary",
+                (),
+                {
+                    "status": "OPEN_HEDGED",
+                    "filled_exchanges": [leg.exchange for leg in task.open_legs],
+                    "failed_exchanges": [],
+                },
+            )()
+
+    monkeypatch.setattr(
+        "app.runtime.trade_execution_service.ExchangeAdapter",
+        lambda session: FakeAdapter(session),
+    )
+    monkeypatch.setattr(
+        "app.runtime.trade_execution_service.TradeExecutor",
+        CapturingTradeExecutor,
+    )
+
+    redis_client = FakeRedis(
+        xread_messages=[
+            (
+                "stream:spot_exec_tasks:node-a",
+                [
+                    (
+                        "1-0",
+                        {
+                            "task_uuid": "task-1",
+                            "user_id": "42",
+                            "symbol": "BTC/USDT",
+                            "buy_exchange": "okx",
+                            "sell_exchange": "gate",
+                            "target_quote_amount": "40.0",
+                        },
+                    )
+                ],
+            )
+        ]
+    )
+    repository = FakeTaskRepository(task_uuid="task-1")
+    consumer = RedisExecutionTaskConsumer(
+        redis_client=redis_client,
+        dispatcher=RedisOpportunityDispatcher(
+            RuntimeTradeExecutionService(session_factory=FakeSessionFactory())
+        ),
+        stream_key="stream:spot_exec_tasks:node-a",
+        task_repository=repository,
+        block_ms=1,
+        region="node-a",
+    )
+
+    processed = await consumer.run(
+        credentials_by_exchange={"okx": object(), "gate": object()},
+        max_iterations=1,
+    )
+
+    assert processed == 1
+    assert [leg.exchange for leg in captured["task"].open_legs] == ["okx", "gate"]
+    assert [leg.side for leg in captured["task"].open_legs] == ["buy", "sell"]
+
+
+@pytest.mark.asyncio
 async def test_executor_marks_execution_result_open_hedged_with_rich_probe_fields():
     redis_client = FakeRedis(
         xread_messages=[
@@ -4082,6 +4251,7 @@ async def test_repair_worker_marks_manual_required_when_repair_fails():
     assert processed == 1
     event = _find_event(router.events, "repair.task.finished")
     assert event.payload["status"] == "MANUAL_REQUIRED"
+    assert event.payload["remaining_failed_exchanges"] == ["gate"]
     assert repository.repair_results[-1]["lifecycle_status"] == "FAILED"
     assert repository.repair_results[-1]["status_reason"] == "manual_required"
 

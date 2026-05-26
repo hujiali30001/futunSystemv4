@@ -74,6 +74,25 @@ async def test_runtime_repair_execution_service_returns_repaired_for_successful_
 
 
 @pytest.mark.asyncio
+async def test_runtime_repair_execution_service_keeps_only_non_repaired_targets_in_remaining_failed_exchanges():
+    service = RuntimeRepairExecutionService(session_factory=FakeSessionFactory(FakeClient()))
+
+    result = await service.run_task(
+        task_uuid="task-1",
+        symbol="BTC/USDT",
+        buy_exchange="okx",
+        sell_exchange="gate",
+        target_exchanges=["gate", "okx"],
+        credentials_by_exchange={"gate": object(), "okx": object()},
+        target_quote_amount=40.0,
+        env_mode="testnet",
+    )
+
+    assert result.repaired_exchanges == ["gate"]
+    assert result.remaining_failed_exchanges == ["okx"]
+
+
+@pytest.mark.asyncio
 async def test_runtime_repair_execution_service_returns_manual_required_when_order_fails():
     service = RuntimeRepairExecutionService(
         session_factory=FakeSessionFactory(FakeClient(should_fail=True))
@@ -99,3 +118,25 @@ async def test_runtime_repair_execution_service_returns_manual_required_when_ord
         remaining_failed_exchanges=["gate"],
         reason="repair order failed",
     )
+
+
+@pytest.mark.asyncio
+async def test_runtime_repair_execution_service_reports_only_target_exchange_as_remaining_when_repair_fails():
+    service = RuntimeRepairExecutionService(
+        session_factory=FakeSessionFactory(FakeClient(should_fail=True))
+    )
+
+    result = await service.run_task(
+        task_uuid="task-1",
+        symbol="BTC/USDT",
+        buy_exchange="okx",
+        sell_exchange="gate",
+        target_exchanges=["gate", "okx"],
+        credentials_by_exchange={"gate": object(), "okx": object()},
+        target_quote_amount=40.0,
+        env_mode="testnet",
+    )
+
+    assert result.repaired_exchanges == []
+    assert result.remaining_failed_exchanges == ["gate"]
+    assert result.reason == "repair order failed"

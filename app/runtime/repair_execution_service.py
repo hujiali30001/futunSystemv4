@@ -35,6 +35,7 @@ class RuntimeRepairExecutionService:
         proxies_by_exchange: dict[str, dict[str, str]] | None = None,
     ) -> RuntimeRepairResult:
         target_exchange = target_exchanges[0]
+        remaining_target_exchanges = list(target_exchanges[1:])
         side = "buy" if target_exchange == buy_exchange else "sell"
         session = self.session_factory.create_session(
             exchange=target_exchange,
@@ -70,7 +71,7 @@ class RuntimeRepairExecutionService:
                 task_uuid=task_uuid,
                 target_exchanges=list(target_exchanges),
                 repaired_exchanges=[target_exchange],
-                remaining_failed_exchanges=[],
+                remaining_failed_exchanges=remaining_target_exchanges,
                 reason=None,
             )
         except Exception as exc:
