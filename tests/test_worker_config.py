@@ -10,22 +10,22 @@ from app.runtime.worker_config import (
 def test_worker_settings_parse_csv_exchange_list():
     settings = WorkerSettings(
         redis_url="redis://127.0.0.1:6379/0",
-        spot_exchanges="okx, bitget ,gate",
+        spot_exchanges="okx, binance ,bybit,bitget,gate",
         worker_role="scanner",
     )
 
-    assert settings.spot_exchanges == ["okx", "bitget", "gate"]
+    assert settings.spot_exchanges == ["okx", "binance", "bybit", "bitget", "gate"]
     assert settings.spot_symbol == "BTC/USDT"
     assert settings.scanner_poll_interval_seconds == 1.0
     assert settings.consumer_block_ms == 1000
 
 
 def test_worker_settings_parse_csv_exchange_list_from_env(monkeypatch):
-    monkeypatch.setenv("SPOT_EXCHANGES", "okx,bitget,gate")
+    monkeypatch.setenv("SPOT_EXCHANGES", "okx,binance,bybit,bitget,gate")
 
     settings = WorkerSettings()
 
-    assert settings.spot_exchanges == ["okx", "bitget", "gate"]
+    assert settings.spot_exchanges == ["okx", "binance", "bybit", "bitget", "gate"]
 
 
 def test_worker_settings_parse_spot_symbols_csv():
@@ -165,3 +165,39 @@ def test_load_exchange_credentials_and_proxies_from_env(monkeypatch):
     assert "gate" not in credentials
     assert proxies["okx"]["http"] == "http://alice:secret@127.0.0.1:8080"
     assert "gate" not in proxies
+
+
+def test_load_exchange_credentials_for_binance(monkeypatch):
+    monkeypatch.setenv("BINANCE_API_KEY", "binance-key")
+    monkeypatch.setenv("BINANCE_SECRET", "binance-secret")
+
+    cred = load_exchange_credential_from_env("binance")
+
+    assert cred is not None
+    assert cred.api_key == "binance-key"
+    assert cred.secret == "binance-secret"
+
+
+def test_load_exchange_credentials_for_bybit(monkeypatch):
+    monkeypatch.setenv("BYBIT_API_KEY", "bybit-key")
+    monkeypatch.setenv("BYBIT_SECRET", "bybit-secret")
+
+    cred = load_exchange_credential_from_env("bybit")
+
+    assert cred is not None
+    assert cred.api_key == "bybit-key"
+    assert cred.secret == "bybit-secret"
+
+
+def test_load_exchange_credentials_for_all_five(monkeypatch):
+    for ex in ["okx", "binance", "bybit", "bitget", "gate"]:
+        monkeypatch.setenv(f"{ex.upper()}_API_KEY", f"{ex}-key")
+        monkeypatch.setenv(f"{ex.upper()}_SECRET", f"{ex}-secret")
+
+    credentials = load_exchange_credentials_from_env(
+        ["okx", "binance", "bybit", "bitget", "gate"]
+    )
+
+    assert set(credentials.keys()) == {"okx", "binance", "bybit", "bitget", "gate"}
+    for ex in ["okx", "binance", "bybit", "bitget", "gate"]:
+        assert credentials[ex].api_key == f"{ex}-key"
