@@ -852,6 +852,45 @@ class ExecutorPreflightValidator:
                     )
 
 
+def _classify_arbitrage_failure(
+    *,
+    execution_status: str,
+    failure_reason: str,
+    repair_result: Any | None = None,
+) -> str:
+    if repair_result is not None and not getattr(repair_result, "ok", False):
+        return "REPAIR_FAILED"
+
+    normalized = (failure_reason or "").lower()
+    transient_network_keywords = (
+        "timeout",
+        "connection",
+        "network",
+        "reset",
+        "temporarily unavailable",
+    )
+    temporary_route_keywords = (
+        "route",
+        "missing execution account",
+        "dispatcher region",
+    )
+    exchange_rejected_keywords = (
+        "reject",
+        "invalid",
+        "insufficient",
+        "reduce-only",
+        "order not accepted",
+    )
+
+    if any(keyword in normalized for keyword in transient_network_keywords):
+        return "TRANSIENT_NETWORK"
+    if any(keyword in normalized for keyword in temporary_route_keywords):
+        return "TEMPORARY_ROUTE"
+    if any(keyword in normalized for keyword in exchange_rejected_keywords):
+        return "EXCHANGE_REJECTED"
+    return "UNKNOWN_HARD_FAILURE"
+
+
 @dataclass(slots=True)
 class ArbitrageAutoRecoveryDecision:
     action: str

@@ -18,6 +18,7 @@ from app.runtime.live_workers import (
     RedisExecutionTaskConsumer,
     RedisRepairTaskConsumer,
     RedisSpotConsumer,
+    _classify_arbitrage_failure,
     _evaluate_account_exchange_coverage,
     _normalize_account_region,
     _parse_market_type_scope,
@@ -6201,3 +6202,63 @@ async def test_arbitrage_execution_consumer_emits_retry_scheduled_event_for_fail
     assert event.payload["failure_reason"] == "repair_failed_manual_required"
     assert event.payload["auto_recovery_status"] == "RETRY_PENDING"
     assert event.payload["next_action"] == "RETRY_PENDING"
+
+
+def test_classify_arbitrage_failure_returns_transient_network_for_timeout_text():
+    result = _classify_arbitrage_failure(
+        execution_status="FAILED",
+        failure_reason="connection timeout while placing order",
+        repair_result=None,
+    )
+
+    assert result == "TRANSIENT_NETWORK"
+
+
+def test_classify_arbitrage_failure_returns_temporary_route_for_route_resolution_text():
+    result = _classify_arbitrage_failure(
+        execution_status="FAILED",
+        failure_reason="missing execution account for exchange=okx",
+        repair_result=None,
+    )
+
+    assert result == "TEMPORARY_ROUTE"
+
+
+def test_classify_arbitrage_failure_returns_exchange_rejected_for_reduce_only_text():
+    result = _classify_arbitrage_failure(
+        execution_status="FAILED",
+        failure_reason="order rejected because reduce-only is required",
+        repair_result=None,
+    )
+
+    assert result == "EXCHANGE_REJECTED"
+
+
+def test_classify_arbitrage_failure_returns_repair_failed_for_failed_repair_result():
+    repair_result = type(
+        "RepairResult",
+        (),
+        {
+            "ok": False,
+            "status": "MANUAL_REQUIRED",
+            "reason": "repair order failed",
+        },
+    )()
+
+    result = _classify_arbitrage_failure(
+        execution_status="OPEN_PARTIAL",
+        failure_reason="repair_failed_manual_required",
+        repair_result=repair_result,
+    )
+
+    assert result == "REPAIR_FAILED"
+
+
+def test_classify_arbitrage_failure_returns_unknown_hard_failure_when_no_rule_matches():
+    result = _classify_arbitrage_failure(
+        execution_status="FAILED",
+        failure_reason="unclassified fatal state",
+        repair_result=None,
+    )
+
+    assert result == "UNKNOWN_HARD_FAILURE"
