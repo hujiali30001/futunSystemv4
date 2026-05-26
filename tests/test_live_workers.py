@@ -5873,6 +5873,7 @@ async def test_arbitrage_execution_consumer_emits_task_failed_event_for_non_repa
         },
     )()
     repository.executable_tasks = [task]
+    repository.tasks_by_uuid[str(task.task_uuid)] = task
     router = FakeEventRouter()
     consumer = ArbitrageExecutionTaskConsumer(
         task_repository=repository,
