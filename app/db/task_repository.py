@@ -1,7 +1,7 @@
 from dataclasses import asdict, dataclass
 from datetime import datetime
 
-from sqlalchemy import desc, select, update
+from sqlalchemy import desc, or_, select, update
 from sqlalchemy.orm import Session
 
 from models import ArbitrageTask
@@ -49,12 +49,18 @@ class TaskRepository:
         env_mode: str,
         limit: int = 100,
     ) -> list[ArbitrageTask]:
+        now = datetime.utcnow()
         return list(
             self.session.scalars(
                 select(ArbitrageTask)
                 .where(
                     ArbitrageTask.env_mode == env_mode,
                     ArbitrageTask.status.in_(("CREATED", "DISPATCHED")),
+                    or_(
+                        ArbitrageTask.auto_recovery_status != "COOLDOWN",
+                        ArbitrageTask.cooldown_until.is_(None),
+                        ArbitrageTask.cooldown_until <= now,
+                    ),
                 )
                 .order_by(ArbitrageTask.id.asc())
                 .limit(limit)
@@ -73,6 +79,11 @@ class TaskRepository:
             .where(
                 ArbitrageTask.env_mode == env_mode,
                 ArbitrageTask.status.in_(("CREATED", "DISPATCHED")),
+                or_(
+                    ArbitrageTask.auto_recovery_status != "COOLDOWN",
+                    ArbitrageTask.cooldown_until.is_(None),
+                    ArbitrageTask.cooldown_until <= claimed_at,
+                ),
             )
             .order_by(ArbitrageTask.id.asc())
             .limit(1)
@@ -174,6 +185,9 @@ class TaskRepository:
         task.failed_exchanges_json = list(failed_exchanges)
         task.repair_action = repair_action
         task.repair_reason = repair_reason
+        task.cooldown_until = None
+        task.failure_reason = None
+        task.auto_recovery_status = "NONE"
         task.finished_at = datetime.utcnow()
         self.session.commit()
         self.session.refresh(task)
@@ -199,6 +213,63 @@ class TaskRepository:
         task.failed_exchanges_json = list(failed_exchanges)
         task.repair_action = repair_action
         task.repair_reason = repair_reason
+        task.cooldown_until = None
+        task.failure_reason = None
+        if lifecycle_status == "SUCCEEDED":
+            task.auto_recovery_status = "NONE"
+        task.finished_at = datetime.utcnow()
+        self.session.commit()
+        self.session.refresh(task)
+        return task
+
+    def mark_auto_recovery_retry(
+        self,
+        task_uuid: str,
+        *,
+        failure_reason: str,
+    ) -> ArbitrageTask:
+        task = self._require_task(task_uuid)
+        task.status = "DISPATCHED"
+        task.status_reason = None
+        task.retry_count += 1
+        task.failure_reason = failure_reason
+        task.auto_recovery_status = "RETRY_PENDING"
+        task.cooldown_until = None
+        task.finished_at = None
+        self.session.commit()
+        self.session.refresh(task)
+        return task
+
+    def mark_auto_recovery_cooldown(
+        self,
+        task_uuid: str,
+        *,
+        failure_reason: str,
+        cooldown_until: datetime,
+    ) -> ArbitrageTask:
+        task = self._require_task(task_uuid)
+        task.status = "DISPATCHED"
+        task.status_reason = None
+        task.failure_reason = failure_reason
+        task.auto_recovery_status = "COOLDOWN"
+        task.cooldown_until = cooldown_until
+        task.finished_at = None
+        self.session.commit()
+        self.session.refresh(task)
+        return task
+
+    def mark_auto_recovery_exhausted(
+        self,
+        task_uuid: str,
+        *,
+        failure_reason: str,
+    ) -> ArbitrageTask:
+        task = self._require_task(task_uuid)
+        task.status = "FAILED"
+        task.status_reason = "auto_recovery_exhausted"
+        task.failure_reason = failure_reason
+        task.auto_recovery_status = "EXHAUSTED"
+        task.cooldown_until = None
         task.finished_at = datetime.utcnow()
         self.session.commit()
         self.session.refresh(task)

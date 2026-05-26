@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 from sqlalchemy import create_engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -318,6 +320,121 @@ def test_task_repository_persists_bound_account_ids():
     assert refreshed is not None
     assert refreshed.buy_account_id == 101
     assert refreshed.sell_account_id == 202
+
+
+def test_task_repository_sets_default_auto_recovery_fields_on_create():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = Session(engine)
+    session.add(User(id=42, username="u42"))
+    session.commit()
+
+    repository = TaskRepository(session)
+    task = repository.create_task(
+        ArbitrageTaskCreate(
+            task_uuid="arb-open-1",
+            user_id=42,
+            strategy_config_id=11,
+            opportunity_id="1-0",
+            env_mode="testnet",
+            task_type="open",
+            symbol="BTC/USDT",
+            spot_exchange="binance",
+            derivative_exchange="okx",
+            target_notional=100.0,
+            expected_spread_bps=25.0,
+            expected_funding_bps=5.0,
+            idempotency_key="42:1-0:open:11",
+            home_region="main",
+        )
+    )
+
+    assert task.retry_count == 0
+    assert task.max_retry_count == 2
+    assert task.cooldown_until is None
+    assert task.failure_reason is None
+    assert task.auto_recovery_status == "NONE"
+
+
+def test_claim_next_executable_task_skips_cooldown_tasks_until_due():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = Session(engine)
+    session.add(User(id=42, username="u42"))
+    session.commit()
+
+    repository = TaskRepository(session)
+    repository.create_task(
+        ArbitrageTaskCreate(
+            task_uuid="arb-cooldown",
+            user_id=42,
+            strategy_config_id=11,
+            opportunity_id="1-0",
+            env_mode="testnet",
+            task_type="open",
+            symbol="BTC/USDT",
+            spot_exchange="binance",
+            derivative_exchange="okx",
+            target_notional=100.0,
+            expected_spread_bps=25.0,
+            expected_funding_bps=5.0,
+            idempotency_key="42:1-0:open:11",
+            home_region="main",
+        )
+    )
+    repository.mark_auto_recovery_cooldown(
+        "arb-cooldown",
+        failure_reason="temporary_route_failure",
+        cooldown_until=datetime.utcnow() + timedelta(minutes=5),
+    )
+
+    claimed = repository.claim_next_executable_task(
+        worker_node_id="node-a",
+        env_mode="testnet",
+    )
+
+    assert claimed is None
+
+
+def test_claim_next_executable_task_can_claim_due_retry_pending_task():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = Session(engine)
+    session.add(User(id=42, username="u42"))
+    session.commit()
+
+    repository = TaskRepository(session)
+    repository.create_task(
+        ArbitrageTaskCreate(
+            task_uuid="arb-retry",
+            user_id=42,
+            strategy_config_id=11,
+            opportunity_id="1-0",
+            env_mode="testnet",
+            task_type="open",
+            symbol="BTC/USDT",
+            spot_exchange="binance",
+            derivative_exchange="okx",
+            target_notional=100.0,
+            expected_spread_bps=25.0,
+            expected_funding_bps=5.0,
+            idempotency_key="42:1-0:retry:11",
+            home_region="main",
+        )
+    )
+    repository.mark_auto_recovery_retry(
+        "arb-retry",
+        failure_reason="temporary_route_failure",
+    )
+
+    claimed = repository.claim_next_executable_task(
+        worker_node_id="node-a",
+        env_mode="testnet",
+    )
+
+    assert claimed is not None
+    assert claimed.task_uuid == "arb-retry"
+    assert claimed.status == "RUNNING"
 
 
 def test_task_repository_marks_execution_result_with_summary_fields():
