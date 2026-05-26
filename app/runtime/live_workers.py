@@ -961,6 +961,13 @@ class RedisExecutionTaskConsumer(RedisSpotConsumer):
                                 if execution_status == "OPEN_HEDGED"
                                 else "FAILED"
                             )
+                            should_emit_failed_event = lifecycle_status == "FAILED"
+                            if (
+                                execution_status == "OPEN_PARTIAL"
+                                and failed_exchanges
+                                and repair_plan.action != "NONE"
+                            ):
+                                should_emit_failed_event = False
                             if task_uuid is not None and self.task_repository is not None:
                                 self.task_repository.mark_execution_result(
                                     task_uuid,
@@ -981,7 +988,7 @@ class RedisExecutionTaskConsumer(RedisSpotConsumer):
                                 )
                             self.last_id = message_id
                             processed += 1
-                            if lifecycle_status == "FAILED":
+                            if should_emit_failed_event:
                                 if self.event_router is not None:
                                     await self.event_router.dispatch(
                                         self._build_failed_event(
