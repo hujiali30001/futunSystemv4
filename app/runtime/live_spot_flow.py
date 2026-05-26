@@ -21,8 +21,6 @@ class SymbolDiscovery:
         self,
         *,
         exchanges: list[str],
-        credentials_by_exchange: dict,
-        env_mode: str = "testnet",
         proxies_by_exchange: dict[str, dict[str, str]] | None = None,
         min_exchange_count: int = 2,
     ) -> dict[str, list[str]]:
@@ -30,9 +28,9 @@ class SymbolDiscovery:
         for exchange in exchanges:
             session = self.session_factory.create_session(
                 exchange=exchange,
-                env_mode=env_mode,
+                env_mode="live",
                 proxies=(proxies_by_exchange or {}).get(exchange, {}),
-                credentials=credentials_by_exchange.get(exchange),
+                credentials=None,
             )
             try:
                 await session.mark_ready()

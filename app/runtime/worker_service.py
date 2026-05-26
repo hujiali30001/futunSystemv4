@@ -72,8 +72,6 @@ class ScannerWorker:
             discovery = SymbolDiscovery(self.scanner.flow_service.session_factory)
             auto_map = await discovery.discover(
                 exchanges=exchanges,
-                credentials_by_exchange=credentials_by_exchange,
-                env_mode=self.settings.env_mode,
                 proxies_by_exchange=proxies_by_exchange,
             )
             if not auto_map:
