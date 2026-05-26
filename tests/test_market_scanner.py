@@ -1,3 +1,6 @@
+import app.market.opportunity as market_opportunity
+import market_scanner
+
 from app.market.opportunity import OpportunityCalculator, OrderbookSnapshot
 from market_scanner import Opportunity, OpportunityCalculator as ExportedCalculator
 from market_scanner import OrderbookSnapshot as ExportedSnapshot
@@ -41,7 +44,78 @@ def test_calculator_returns_open_and_close_spread():
 def test_market_scanner_exports_opportunity_primitives():
     assert ExportedCalculator is OpportunityCalculator
     assert ExportedSnapshot is OrderbookSnapshot
-    assert Opportunity.__name__ == "Opportunity"
+    assert Opportunity is market_opportunity.ArbitrageOpportunity
+
+
+def test_arbitrage_opportunity_to_payload_contains_open_close_boundary_fields():
+    opportunity = market_opportunity.ArbitrageOpportunity(
+        symbol="BTC/USDT",
+        spot_exchange="binance",
+        derivative_exchange="okx",
+        opportunity_type="OPEN",
+        open_spread_bps=120.5,
+        close_spread_bps=90.25,
+        funding_rate=0.0004,
+        annualized_bps=150.0,
+        redis_member="binance:okx:BTC/USDT:OPEN:1",
+        timestamp=123.0,
+    )
+
+    payload = market_opportunity.arbitrage_opportunity_to_payload(opportunity)
+
+    assert payload == {
+        "symbol": "BTC/USDT",
+        "spot_exchange": "binance",
+        "derivative_exchange": "okx",
+        "opportunity_type": "OPEN",
+        "open_spread_bps": 120.5,
+        "close_spread_bps": 90.25,
+        "funding_rate": 0.0004,
+        "annualized_bps": 150.0,
+        "redis_member": "binance:okx:BTC/USDT:OPEN:1",
+        "timestamp": 123.0,
+    }
+
+
+def test_calculator_builds_arbitrage_opportunity_with_explicit_type():
+    calculator = OpportunityCalculator()
+    spot = OrderbookSnapshot(
+        best_bid=100.0,
+        best_ask=101.0,
+        bids=[[100.0, 5.0]],
+        asks=[[101.0, 5.0]],
+    )
+    derivative = OrderbookSnapshot(
+        best_bid=104.0,
+        best_ask=105.0,
+        bids=[[104.0, 4.0]],
+        asks=[[105.0, 4.0]],
+    )
+
+    result = calculator.build_arbitrage_opportunity(
+        symbol="BTC/USDT",
+        spot_exchange="binance",
+        derivative_exchange="okx",
+        spot=spot,
+        derivative=derivative,
+        funding_rate=0.0005,
+        opportunity_type="CLOSE",
+    )
+
+    assert result.opportunity_type == "CLOSE"
+    assert round(result.open_spread_bps, 2) == round(
+        ((105.0 - 101.0) / 101.0) * 10000,
+        2,
+    )
+    assert round(result.close_spread_bps, 2) == round(
+        ((104.0 - 100.0) / 100.0) * 10000,
+        2,
+    )
+    assert result.redis_member.startswith("binance:okx:BTC/USDT:CLOSE:")
+
+
+def test_market_scanner_exports_arbitrage_opportunity_name():
+    assert market_scanner.ArbitrageOpportunity.__name__ == "ArbitrageOpportunity"
 
 
 def test_calculator_builds_spot_opportunity_from_effective_depth_prices():

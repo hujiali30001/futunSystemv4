@@ -11,16 +11,37 @@ class OrderbookSnapshot:
 
 
 @dataclass(slots=True)
-class Opportunity:
+class ArbitrageOpportunity:
     symbol: str
     spot_exchange: str
     derivative_exchange: str
+    opportunity_type: str
     open_spread_bps: float
     close_spread_bps: float
     funding_rate: float
     annualized_bps: float
     redis_member: str
     timestamp: float
+
+
+def arbitrage_opportunity_to_payload(
+    opportunity: ArbitrageOpportunity,
+) -> dict[str, object]:
+    return {
+        "symbol": opportunity.symbol,
+        "spot_exchange": opportunity.spot_exchange,
+        "derivative_exchange": opportunity.derivative_exchange,
+        "opportunity_type": opportunity.opportunity_type,
+        "open_spread_bps": opportunity.open_spread_bps,
+        "close_spread_bps": opportunity.close_spread_bps,
+        "funding_rate": opportunity.funding_rate,
+        "annualized_bps": opportunity.annualized_bps,
+        "redis_member": opportunity.redis_member,
+        "timestamp": opportunity.timestamp,
+    }
+
+
+Opportunity = ArbitrageOpportunity
 
 
 @dataclass(slots=True)
@@ -59,6 +80,39 @@ def spot_opportunity_to_payload(opportunity: SpotOpportunity) -> dict[str, objec
 
 
 class OpportunityCalculator:
+    def build_arbitrage_opportunity(
+        self,
+        *,
+        symbol: str,
+        spot_exchange: str,
+        derivative_exchange: str,
+        spot: OrderbookSnapshot,
+        derivative: OrderbookSnapshot,
+        funding_rate: float,
+        opportunity_type: str,
+    ) -> ArbitrageOpportunity:
+        if opportunity_type not in {"OPEN", "CLOSE"}:
+            raise ValueError(f"unsupported opportunity_type: {opportunity_type}")
+
+        open_spread = (derivative.best_ask - spot.best_ask) / spot.best_ask
+        close_spread = (derivative.best_bid - spot.best_bid) / spot.best_bid
+        current_time = time()
+        return ArbitrageOpportunity(
+            symbol=symbol,
+            spot_exchange=spot_exchange,
+            derivative_exchange=derivative_exchange,
+            opportunity_type=opportunity_type,
+            open_spread_bps=open_spread * 10000,
+            close_spread_bps=close_spread * 10000,
+            funding_rate=funding_rate,
+            annualized_bps=(open_spread + funding_rate) * 365 * 10000,
+            redis_member=(
+                f"{spot_exchange}:{derivative_exchange}:{symbol}:"
+                f"{opportunity_type}:{int(current_time * 1000)}"
+            ),
+            timestamp=current_time,
+        )
+
     def build_opportunity(
         self,
         *,
@@ -68,20 +122,15 @@ class OpportunityCalculator:
         spot: OrderbookSnapshot,
         derivative: OrderbookSnapshot,
         funding_rate: float,
-    ) -> Opportunity:
-        open_spread = (derivative.best_ask - spot.best_ask) / spot.best_ask
-        close_spread = (derivative.best_bid - spot.best_bid) / spot.best_bid
-        current_time = time()
-        return Opportunity(
+    ) -> ArbitrageOpportunity:
+        return self.build_arbitrage_opportunity(
             symbol=symbol,
             spot_exchange=spot_exchange,
             derivative_exchange=derivative_exchange,
-            open_spread_bps=open_spread * 10000,
-            close_spread_bps=close_spread * 10000,
+            spot=spot,
+            derivative=derivative,
             funding_rate=funding_rate,
-            annualized_bps=(open_spread + funding_rate) * 365 * 10000,
-            redis_member=f"{spot_exchange}:{derivative_exchange}:{symbol}:{int(current_time * 1000)}",
-            timestamp=current_time,
+            opportunity_type="OPEN",
         )
 
     def _weighted_buy_price(
