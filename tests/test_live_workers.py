@@ -6208,6 +6208,168 @@ async def test_arbitrage_execution_consumer_emits_cooldown_started_event_for_fai
     assert event.payload["next_action"] == "COOLDOWN"
 
 
+@pytest.mark.asyncio
+async def test_arbitrage_execution_consumer_routes_first_repair_failure_to_cooldown():
+    repository = FakeTaskRepository(task_uuid="arb-open-repair-cooldown-1")
+    task = type(
+        "Task",
+        (),
+        {
+            "task_uuid": "arb-open-repair-cooldown-1",
+            "user_id": 42,
+            "task_type": "open",
+            "symbol": "BTC/USDT",
+            "spot_exchange": "binance",
+            "derivative_exchange": "okx",
+            "target_notional": 100.0,
+            "retry_count": 0,
+            "max_retry_count": 2,
+            "auto_recovery_status": "NONE",
+            "failure_reason": None,
+            "cooldown_until": None,
+        },
+    )()
+    repository.executable_tasks = [task]
+    repository.tasks_by_uuid[str(task.task_uuid)] = task
+    router = FakeEventRouter()
+    consumer = ArbitrageExecutionTaskConsumer(
+        task_repository=repository,
+        execution_adapter=ArbitrageExecutionAdapterStub(
+            result=type(
+                "ExecutionSummary",
+                (),
+                {
+                    "ok": False,
+                    "execution_status": "OPEN_PARTIAL",
+                    "filled_exchanges": ["binance"],
+                    "failed_exchanges": ["okx"],
+                },
+            )()
+        ),
+        repair_service=FakeRepairExecutionService(
+            result=type(
+                "RepairResult",
+                (),
+                {
+                    "ok": False,
+                    "status": "MANUAL_REQUIRED",
+                    "target_exchanges": ["okx"],
+                    "repaired_exchanges": [],
+                    "remaining_failed_exchanges": ["okx"],
+                    "reason": "repair order failed",
+                },
+            )()
+        ),
+        account_repository=FakeAccountRepository(
+            {
+                "42": [
+                    FakeExchangeAccount(account_id=11, exchange="binance"),
+                    FakeExchangeAccount(account_id=12, exchange="okx"),
+                ]
+            }
+        ),
+        worker_node_id="node-a",
+        env_mode="testnet",
+        event_router=router,
+        region="node-a",
+    )
+
+    processed = await consumer.run_once(
+        credentials_by_exchange={"binance": object(), "okx": object()},
+        proxies_by_exchange={"binance": {}, "okx": {}},
+    )
+
+    assert processed == 1
+    assert repository.retry_marked == []
+    assert len(repository.cooldowns) == 1
+    assert repository.cooldowns[0]["task_uuid"] == "arb-open-repair-cooldown-1"
+    assert repository.cooldowns[0]["failure_reason"] == "REPAIR_FAILED"
+    assert repository.exhausted == []
+    event = _find_event(router.events, "arb.recovery.cooldown_started")
+    assert event.payload["failure_reason"] == "REPAIR_FAILED"
+
+
+@pytest.mark.asyncio
+async def test_arbitrage_execution_consumer_routes_second_repair_failure_to_exhausted():
+    repository = FakeTaskRepository(task_uuid="arb-open-repair-exhausted-1")
+    task = type(
+        "Task",
+        (),
+        {
+            "task_uuid": "arb-open-repair-exhausted-1",
+            "user_id": 42,
+            "task_type": "open",
+            "symbol": "BTC/USDT",
+            "spot_exchange": "binance",
+            "derivative_exchange": "okx",
+            "target_notional": 100.0,
+            "retry_count": 1,
+            "max_retry_count": 2,
+            "auto_recovery_status": "COOLDOWN",
+            "failure_reason": "REPAIR_FAILED",
+            "cooldown_until": None,
+        },
+    )()
+    repository.executable_tasks = [task]
+    repository.tasks_by_uuid[str(task.task_uuid)] = task
+    router = FakeEventRouter()
+    consumer = ArbitrageExecutionTaskConsumer(
+        task_repository=repository,
+        execution_adapter=ArbitrageExecutionAdapterStub(
+            result=type(
+                "ExecutionSummary",
+                (),
+                {
+                    "ok": False,
+                    "execution_status": "OPEN_PARTIAL",
+                    "filled_exchanges": ["binance"],
+                    "failed_exchanges": ["okx"],
+                },
+            )()
+        ),
+        repair_service=FakeRepairExecutionService(
+            result=type(
+                "RepairResult",
+                (),
+                {
+                    "ok": False,
+                    "status": "MANUAL_REQUIRED",
+                    "target_exchanges": ["okx"],
+                    "repaired_exchanges": [],
+                    "remaining_failed_exchanges": ["okx"],
+                    "reason": "repair order failed",
+                },
+            )()
+        ),
+        account_repository=FakeAccountRepository(
+            {
+                "42": [
+                    FakeExchangeAccount(account_id=11, exchange="binance"),
+                    FakeExchangeAccount(account_id=12, exchange="okx"),
+                ]
+            }
+        ),
+        worker_node_id="node-a",
+        env_mode="testnet",
+        event_router=router,
+        region="node-a",
+    )
+
+    processed = await consumer.run_once(
+        credentials_by_exchange={"binance": object(), "okx": object()},
+        proxies_by_exchange={"binance": {}, "okx": {}},
+    )
+
+    assert processed == 1
+    assert repository.retry_marked == []
+    assert repository.cooldowns == []
+    assert repository.exhausted == [
+        {"task_uuid": "arb-open-repair-exhausted-1", "failure_reason": "REPAIR_FAILED"}
+    ]
+    event = _find_event(router.events, "arb.recovery.exhausted")
+    assert event.payload["failure_reason"] == "REPAIR_FAILED"
+
+
 def test_decide_arbitrage_recovery_returns_retry_pending_for_transient_network():
     task = type(
         "Task",

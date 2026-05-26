@@ -233,7 +233,11 @@ class AlertRouter:
                 await self._send_feishu(event)
 
     def _should_dedupe(self, event: RuntimeEvent) -> bool:
-        key = f"{event.event_type}:{event.symbol or '-'}:{event.exchange or '-'}"
+        if event.event_type == "arb.recovery.exhausted":
+            task_uuid = None if event.payload is None else event.payload.get("task_uuid")
+            key = f"{event.event_type}:{task_uuid or '-'}"
+        else:
+            key = f"{event.event_type}:{event.symbol or '-'}:{event.exchange or '-'}"
         now = self.time_provider()
         last_sent = self._dedupe_cache.get(key)
         dedupe_window_seconds = max(self.dedupe_window_seconds, 300)

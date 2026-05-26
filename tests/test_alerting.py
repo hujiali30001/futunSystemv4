@@ -615,6 +615,59 @@ async def test_alert_router_dedupes_error_events_in_the_same_window():
 
 
 @pytest.mark.asyncio
+async def test_alert_router_dedupes_recovery_exhausted_by_task_uuid():
+    timestamps = iter([100.0, 120.0, 121.0])
+    router = AlertRouter(
+        logger=FakeLogger(),
+        feishu_notifier=FakeNotifier(),
+        email_notifier=FakeNotifier(),
+        alerts_enabled=True,
+        feishu_enabled=True,
+        email_enabled=True,
+        success_spread_bps_threshold=50.0,
+        dedupe_window_seconds=60,
+        time_provider=lambda: next(timestamps),
+    )
+    first = RuntimeEvent(
+        event_type="arb.recovery.exhausted",
+        level="ERROR",
+        service="arb_executor",
+        message="arbitrage recovery exhausted",
+        symbol="BTC/USDT",
+        exchange="binance",
+        payload={"task_uuid": "arb-exhausted-1", "error": "TRANSIENT_NETWORK"},
+    )
+    duplicate = RuntimeEvent(
+        event_type="arb.recovery.exhausted",
+        level="ERROR",
+        service="arb_executor",
+        message="arbitrage recovery exhausted",
+        symbol="BTC/USDT",
+        exchange="okx",
+        payload={"task_uuid": "arb-exhausted-1", "error": "TRANSIENT_NETWORK"},
+    )
+    different_task = RuntimeEvent(
+        event_type="arb.recovery.exhausted",
+        level="ERROR",
+        service="arb_executor",
+        message="arbitrage recovery exhausted",
+        symbol="BTC/USDT",
+        exchange="okx",
+        payload={"task_uuid": "arb-exhausted-2", "error": "TRANSIENT_NETWORK"},
+    )
+
+    await router.dispatch(first)
+    await router.dispatch(duplicate)
+    await router.dispatch(different_task)
+
+    assert len(router.logger.events) == 3
+    assert len(router.feishu_notifier.events) == 2
+    assert router.feishu_notifier.events[0].payload["task_uuid"] == "arb-exhausted-1"
+    assert router.feishu_notifier.events[1].payload["task_uuid"] == "arb-exhausted-2"
+    assert len(router.email_notifier.events) == 0
+
+
+@pytest.mark.asyncio
 async def test_alert_router_routes_critical_events_to_feishu_and_email():
     router = build_router()
     event = RuntimeEvent(
