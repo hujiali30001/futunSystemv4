@@ -242,6 +242,48 @@ def test_feishu_notifier_renders_arbitrage_failure_message():
     assert "原因：FAILED" in body["content"]["text"]
 
 
+def test_feishu_notifier_renders_arbitrage_recovery_exhausted_message():
+    captured = {}
+
+    def fake_urlopen(request, timeout=5):
+        captured["body"] = request.data
+        return FakeHttpResponse()
+
+    notifier = FeishuNotifier(
+        webhook_url="https://example.test/hook",
+        urlopen=fake_urlopen,
+    )
+    event = RuntimeEvent(
+        event_type="arb.recovery.exhausted",
+        level="ERROR",
+        service="arb_executor",
+        message="arbitrage recovery exhausted",
+        symbol="BTC/USDT",
+        payload={
+            "task_uuid": "arb-close-exhausted-evt",
+            "task_type": "close",
+            "spot_exchange": "binance",
+            "derivative_exchange": "okx",
+            "failure_reason": "execution_failed_non_repairable",
+            "retry_count": 2,
+            "max_retry_count": 2,
+            "auto_recovery_status": "EXHAUSTED",
+            "next_action": "EXHAUSTED",
+        },
+    )
+
+    notifier.send_sync(event)
+    body = json.loads(captured["body"].decode("utf-8"))
+
+    assert "套利自动恢复已耗尽" in body["content"]["text"]
+    assert "交易对：BTC/USDT" in body["content"]["text"]
+    assert "任务类型：close" in body["content"]["text"]
+    assert "现货交易所：binance" in body["content"]["text"]
+    assert "衍生品交易所：okx" in body["content"]["text"]
+    assert "恢复状态：EXHAUSTED" in body["content"]["text"]
+    assert "重试次数：2/2" in body["content"]["text"]
+
+
 def test_email_notifier_builds_and_sends_message():
     smtp_instances = []
 
@@ -397,6 +439,42 @@ async def test_alert_router_does_not_send_feishu_for_info_arbitrage_events():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("event_type", "message"),
+    [
+        ("arb.recovery.retry_scheduled", "arbitrage recovery retry scheduled"),
+        ("arb.recovery.cooldown_started", "arbitrage recovery cooldown started"),
+    ],
+)
+async def test_alert_router_does_not_send_feishu_for_info_recovery_events(
+    event_type, message
+):
+    router = build_router()
+    event = RuntimeEvent(
+        event_type=event_type,
+        level="INFO",
+        service="arb_executor",
+        message=message,
+        symbol="BTC/USDT",
+        payload={
+            "task_uuid": "arb-recovery-1",
+            "task_type": "close",
+            "spot_exchange": "binance",
+            "derivative_exchange": "okx",
+            "retry_count": 1,
+            "max_retry_count": 2,
+            "auto_recovery_status": "RETRY_PENDING",
+        },
+    )
+
+    await router.dispatch(event)
+
+    assert len(router.logger.events) == 1
+    assert len(router.feishu_notifier.events) == 0
+    assert len(router.email_notifier.events) == 0
+
+
+@pytest.mark.asyncio
 async def test_alert_router_sends_feishu_for_error_arbitrage_repair_event():
     router = build_router()
     event = RuntimeEvent(
@@ -414,6 +492,35 @@ async def test_alert_router_sends_feishu_for_error_arbitrage_repair_event():
             "remaining_failed_exchanges": ["okx"],
             "reason": "repair order failed",
             "error": "repair order failed",
+        },
+    )
+
+    await router.dispatch(event)
+
+    assert len(router.logger.events) == 1
+    assert len(router.feishu_notifier.events) == 1
+    assert len(router.email_notifier.events) == 0
+
+
+@pytest.mark.asyncio
+async def test_alert_router_sends_feishu_for_error_recovery_exhausted_event():
+    router = build_router()
+    event = RuntimeEvent(
+        event_type="arb.recovery.exhausted",
+        level="ERROR",
+        service="arb_executor",
+        message="arbitrage recovery exhausted",
+        symbol="BTC/USDT",
+        payload={
+            "task_uuid": "arb-recovery-2",
+            "task_type": "close",
+            "spot_exchange": "binance",
+            "derivative_exchange": "okx",
+            "failure_reason": "execution_failed_non_repairable",
+            "retry_count": 2,
+            "max_retry_count": 2,
+            "auto_recovery_status": "EXHAUSTED",
+            "next_action": "EXHAUSTED",
         },
     )
 

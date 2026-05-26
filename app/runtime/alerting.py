@@ -26,6 +26,9 @@ def _event_title_zh(event: RuntimeEvent) -> str:
         "arb.executor.repair_planned": "套利修复已计划",
         "arb.executor.task_failed": "套利任务失败",
         "arb.repair.finished": "套利修复完成",
+        "arb.recovery.retry_scheduled": "套利自动重试已安排",
+        "arb.recovery.cooldown_started": "套利自动冷却已开始",
+        "arb.recovery.exhausted": "套利自动恢复已耗尽",
     }
     return mapping.get(event.event_type, event.event_type)
 
@@ -60,6 +63,25 @@ class FeishuNotifier:
 
     def _render_text(self, event: RuntimeEvent) -> str:
         title = _event_title_zh(event)
+        if event.event_type.startswith("arb.recovery."):
+            payload = event.payload or {}
+            retry_count = payload.get("retry_count", "-")
+            max_retry_count = payload.get("max_retry_count", "-")
+            return "\n".join(
+                [
+                    title,
+                    f"服务：{event.service}",
+                    f"交易对：{event.symbol or '-'}",
+                    f"任务类型：{payload.get('task_type', '-')}",
+                    f"现货交易所：{payload.get('spot_exchange', '-')}",
+                    f"衍生品交易所：{payload.get('derivative_exchange', '-')}",
+                    f"恢复状态：{payload.get('auto_recovery_status', '-')}",
+                    f"下一动作：{payload.get('next_action', '-')}",
+                    f"重试次数：{retry_count}/{max_retry_count}",
+                    f"冷却截止：{payload.get('cooldown_until', '-')}",
+                    f"原因：{payload.get('failure_reason', event.message)}",
+                ]
+            )
         if event.event_type.startswith("arb."):
             payload = event.payload or {}
             failed_exchanges = ",".join(payload.get("failed_exchanges", []) or []) or "-"
