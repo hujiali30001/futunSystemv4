@@ -32,7 +32,6 @@ class ExchangeAccountSession:
     markets: dict[str, Any] = field(default_factory=dict)
     client: Any = field(default=None)
     closed: bool = False
-    credentials: ExchangeCredentials | None = None
 
     async def mark_ready(self) -> None:
         if self.client is not None and hasattr(self.client, "load_markets"):
@@ -72,21 +71,15 @@ class ExchangeClientFactory:
             "enableRateLimit": True,
             "proxies": proxies,
         }
-        demo_bybit = exchange == "bybit" and env_mode == "testnet"
-        if credentials is not None and not demo_bybit:
+        if credentials is not None:
             config["apiKey"] = credentials.api_key
             config["secret"] = credentials.secret
             if credentials.password:
                 config["password"] = credentials.password
 
         client = exchange_class(config)
-        if env_mode == "testnet" and exchange == "bybit" and hasattr(client, "urls"):
-            if hasattr(client, "set_sandbox_mode"):
-                client.set_sandbox_mode(True)
-            client.urls["api"] = {
-                "public": "https://api-demo.bybit.com",
-                "private": "https://api-demo.bybit.com",
-            }
+        if env_mode == "testnet" and exchange == "bybit" and hasattr(client, "enable_demo_trading"):
+            client.enable_demo_trading(True)
         elif env_mode == "testnet" and hasattr(client, "set_sandbox_mode"):
             client.set_sandbox_mode(True)
         return ExchangeAccountSession(
@@ -94,7 +87,6 @@ class ExchangeClientFactory:
             env_mode=env_mode,
             proxies=proxies,
             client=client,
-            credentials=credentials if demo_bybit else None,
         )
 
     @staticmethod

@@ -122,10 +122,13 @@ def test_exchange_factory_creates_bybit_session():
         def __init__(self, config):
             self.config = config
             self.sandbox_enabled = False
-            self.urls = {"api": {"public": "", "private": ""}}
+            self.demo_enabled = False
 
         def set_sandbox_mode(self, enabled):
             self.sandbox_enabled = enabled
+
+        def enable_demo_trading(self, enabled):
+            self.demo_enabled = enabled
 
     class FakeCcxtModule:
         bybit = FakeExchangeClient
@@ -143,9 +146,9 @@ def test_exchange_factory_creates_bybit_session():
 
     assert session.exchange == "bybit"
     assert session.env_mode == "testnet"
-    assert "apiKey" not in session.client.config
-    assert session.client.sandbox_enabled is True
-    assert session.client.urls["api"]["public"] == "https://api-demo.bybit.com"
+    assert session.client.config["apiKey"] == "bybit-key"
+    assert session.client.sandbox_enabled is False
+    assert session.client.demo_enabled is True
 
 
 def test_exchange_factory_creates_all_five_sessions():
@@ -153,9 +156,13 @@ def test_exchange_factory_creates_all_five_sessions():
         def __init__(self, config):
             self.config = config
             self.sandbox_enabled = False
+            self.demo_enabled = False
 
         def set_sandbox_mode(self, enabled):
             self.sandbox_enabled = enabled
+
+        def enable_demo_trading(self, enabled):
+            self.demo_enabled = enabled
 
     class FakeCcxtModule:
         okx = FakeExchangeClient
@@ -174,4 +181,8 @@ def test_exchange_factory_creates_all_five_sessions():
             credentials=ExchangeCredentials(api_key="k", secret="s"),
         )
         assert session.exchange == exchange
-        assert session.client.sandbox_enabled is True
+        if exchange == "bybit":
+            assert session.client.sandbox_enabled is False
+            assert session.client.demo_enabled is True
+        else:
+            assert session.client.sandbox_enabled is True
