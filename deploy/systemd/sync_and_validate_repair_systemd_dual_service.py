@@ -21,6 +21,8 @@ CANARY_TASK_UUID = "repair-systemd-canary-1"
 CANARY_SOURCE_ID = "repair-systemd-src-1"
 CANARY_BUY_ACCOUNT_ID = 37
 CANARY_SELL_ACCOUNT_ID = 39
+MAIN_EXECUTOR_STREAM = "stream:spot_exec_tasks:main"
+MAIN_REPAIR_STREAM = "stream:repair_tasks:main"
 CANARY_EXECUTOR_STREAM = "stream:spot_exec_tasks:repair-canary"
 CANARY_REPAIR_STREAM = "stream:repair_tasks:repair-canary"
 FILES_TO_SYNC = [
@@ -314,10 +316,10 @@ PY
     return json.loads(output)
 
 
-def delete_remote_canary_task() -> None:
-    remote_bash(
+def delete_remote_canary_task() -> str:
+    return remote_bash(
         f"""
-set +e
+set -euo pipefail
 cd {REMOTE_ROOT}
 PYTHONPATH={REMOTE_ROOT} {REMOTE_VENV_PYTHON} - <<'PY'
 from pathlib import Path
@@ -336,14 +338,93 @@ for raw in Path("{REMOTE_ENV}").read_text(encoding="utf-8").splitlines():
     env[key.strip()] = value.strip()
 
 database_url = env.get("DATABASE_URL")
+removed = 0
 if database_url:
     session_factory = build_session_factory(database_url)
     with session_factory() as session:
-        session.execute(
+        delete_result = session.execute(
             delete(ArbitrageTask).where(ArbitrageTask.task_uuid == "{CANARY_TASK_UUID}")
         )
         session.commit()
+        removed = delete_result.rowcount or 0
+print(removed)
 PY
+"""
+    )
+
+
+def collect_remote_stream_entries(stream_key: str, count: int = 50) -> str:
+    return remote_bash(f"redis-cli XREVRANGE {stream_key} + - COUNT {count}")
+
+
+def delete_remote_stream_entries(stream_key: str, message_ids: list[str]) -> str:
+    if not message_ids:
+        return "0"
+    ids = " ".join(message_ids)
+    return remote_bash(f"redis-cli XDEL {stream_key} {ids}")
+
+
+def extract_matching_message_ids(xrevrange_output: str, *, task_uuid: str) -> list[str]:
+    lines = [line.strip() for line in xrevrange_output.splitlines() if line.strip()]
+    matches: list[str] = []
+    current_id: str | None = None
+    current_fields: list[str] = []
+    for line in lines:
+        if "-" in line and line.split("-", 1)[0].isdigit():
+            if current_id is not None and task_uuid in current_fields:
+                matches.append(current_id)
+            current_id = line
+            current_fields = []
+            continue
+        current_fields.append(line)
+    if current_id is not None and task_uuid in current_fields:
+        matches.append(current_id)
+    return matches
+
+
+def cleanup_remote_canary_streams(*, task_uuid: str) -> dict[str, list[str] | str]:
+    main_executor_entries = collect_remote_stream_entries(MAIN_EXECUTOR_STREAM)
+    main_repair_entries = collect_remote_stream_entries(MAIN_REPAIR_STREAM)
+    canary_executor_entries = collect_remote_stream_entries(CANARY_EXECUTOR_STREAM)
+    canary_repair_entries = collect_remote_stream_entries(CANARY_REPAIR_STREAM)
+
+    main_executor_removed_ids = extract_matching_message_ids(
+        main_executor_entries, task_uuid=task_uuid
+    )
+    main_repair_removed_ids = extract_matching_message_ids(
+        main_repair_entries, task_uuid=task_uuid
+    )
+    canary_executor_removed_ids = extract_matching_message_ids(
+        canary_executor_entries, task_uuid=task_uuid
+    )
+    canary_repair_removed_ids = extract_matching_message_ids(
+        canary_repair_entries, task_uuid=task_uuid
+    )
+
+    delete_remote_stream_entries(MAIN_EXECUTOR_STREAM, main_executor_removed_ids)
+    delete_remote_stream_entries(MAIN_REPAIR_STREAM, main_repair_removed_ids)
+    delete_remote_stream_entries(CANARY_EXECUTOR_STREAM, canary_executor_removed_ids)
+    delete_remote_stream_entries(CANARY_REPAIR_STREAM, canary_repair_removed_ids)
+
+    return {
+        "main_executor_removed_ids": main_executor_removed_ids,
+        "main_repair_removed_ids": main_repair_removed_ids,
+        "canary_executor_removed_ids": canary_executor_removed_ids,
+        "canary_repair_removed_ids": canary_repair_removed_ids,
+    }
+
+
+def restore_remote_runtime_assets() -> None:
+    remote_bash(
+        f"""
+set +e
+cd {REMOTE_ROOT}
+if [ -f .env.worker.repair-systemd-canary.bak ]; then
+  mv .env.worker.repair-systemd-canary.bak .env.worker
+fi
+rm -f sitecustomize.py
+sudo systemctl restart furun-spot-executor.service
+sudo systemctl restart furun-spot-repair.service
 """
     )
 
@@ -385,6 +466,8 @@ def main() -> int:
             unit_path=REPAIR_UNIT_PATH,
             unit_content=REPAIR_UNIT_CONTENT,
         )
+        pre_run_task_truth_removed = delete_remote_canary_task()
+        pre_run_cleanup_result = cleanup_remote_canary_streams(task_uuid=CANARY_TASK_UUID)
         preseed_task = preseed_remote_canary_task()
 
         remote_bash(
@@ -400,10 +483,14 @@ lines = [line for line in lines if not line.startswith("FURUN_CANARY_MODE=")]
 lines = [line for line in lines if not line.startswith("FURUN_CANARY_REPAIR_RESULT=")]
 lines = [line for line in lines if not line.startswith("EXECUTOR_STREAM_KEY=")]
 lines = [line for line in lines if not line.startswith("REPAIR_STREAM_KEY=")]
+lines = [line for line in lines if not line.startswith("WORKER_REGION=")]
+lines = [line for line in lines if not line.startswith("NODE_ID=")]
 lines.append("FURUN_CANARY_MODE=repair_systemd_dual_service")
 lines.append("FURUN_CANARY_REPAIR_RESULT=success")
 lines.append("EXECUTOR_STREAM_KEY=stream:spot_exec_tasks:repair-canary")
 lines.append("REPAIR_STREAM_KEY=stream:repair_tasks:repair-canary")
+lines.append("WORKER_REGION=repair-canary")
+lines.append("NODE_ID=repair-canary")
 env_path.write_text("\\n".join(lines) + "\\n", encoding="utf-8")
 PY
 sudo systemctl restart furun-spot-executor.service
@@ -416,12 +503,12 @@ sleep 3
             "furun-spot-executor.service"
         )
         active_repair = wait_for_active_service("furun-spot-repair.service")
-        baseline_exec_len = remote_bash("redis-cli XLEN stream:spot_exec_tasks:main")
-        baseline_repair_len = remote_bash("redis-cli XLEN stream:repair_tasks:main")
+        baseline_exec_len = remote_bash(f"redis-cli XLEN {CANARY_EXECUTOR_STREAM}")
+        baseline_repair_len = remote_bash(f"redis-cli XLEN {CANARY_REPAIR_STREAM}")
 
         remote_bash(
             f"""
-redis-cli XADD stream:spot_exec_tasks:repair-canary '*' \
+redis-cli XADD {CANARY_EXECUTOR_STREAM} '*' \
 task_uuid {CANARY_TASK_UUID} \
 user_id 42 \
 source_message_id {CANARY_SOURCE_ID} \
@@ -437,7 +524,7 @@ sleep 5
         final_task = wait_for_remote_canary_task()
 
         latest_repair_entries = remote_bash(
-            "redis-cli XREVRANGE stream:repair_tasks:main + - COUNT 5"
+            f"redis-cli XREVRANGE {CANARY_REPAIR_STREAM} + - COUNT 5"
         )
         executor_logs = remote_bash(
             "sudo journalctl -u furun-spot-executor.service -n 120 --no-pager | grep -E 'executor\\\\.repair_planned|repair-systemd-canary-1' || true"
@@ -445,14 +532,50 @@ sleep 5
         repair_logs = remote_bash(
             "sudo journalctl -u furun-spot-repair.service -n 120 --no-pager | grep -E 'repair\\\\.task\\\\.finished|repair-systemd-canary-1' || true"
         )
-        final_exec_len = remote_bash("redis-cli XLEN stream:spot_exec_tasks:main")
-        final_repair_len = remote_bash("redis-cli XLEN stream:repair_tasks:main")
+        final_exec_len = remote_bash(f"redis-cli XLEN {CANARY_EXECUTOR_STREAM}")
+        final_repair_len = remote_bash(f"redis-cli XLEN {CANARY_REPAIR_STREAM}")
+        post_run_task_truth_removed = delete_remote_canary_task()
+        post_run_cleanup_result = cleanup_remote_canary_streams(task_uuid=CANARY_TASK_UUID)
+        post_cleanup_main_executor = collect_remote_stream_entries(
+            MAIN_EXECUTOR_STREAM, count=20
+        )
+        post_cleanup_main_repair = collect_remote_stream_entries(
+            MAIN_REPAIR_STREAM, count=20
+        )
+        post_cleanup_canary_executor = collect_remote_stream_entries(
+            CANARY_EXECUTOR_STREAM, count=20
+        )
+        post_cleanup_canary_repair = collect_remote_stream_entries(
+            CANARY_REPAIR_STREAM, count=20
+        )
+        restore_started_at = remote_bash("date '+%Y-%m-%d %H:%M:%S %z'")
+        restore_remote_runtime_assets()
+        restored_executor = wait_for_active_service("furun-spot-executor.service")
+        restored_repair = wait_for_active_service("furun-spot-repair.service")
+        executor_silence_logs = remote_bash(
+            f"sudo journalctl -u furun-spot-executor.service --since '{restore_started_at}' --no-pager | grep 'repair-systemd-canary-1' || true"
+        )
+        cleanup_result = {
+            "pre_run_task_truth_removed": pre_run_task_truth_removed,
+            "pre_run_main_executor_removed_ids": pre_run_cleanup_result["main_executor_removed_ids"],
+            "pre_run_main_repair_removed_ids": pre_run_cleanup_result["main_repair_removed_ids"],
+            "pre_run_canary_executor_removed_ids": pre_run_cleanup_result["canary_executor_removed_ids"],
+            "pre_run_canary_repair_removed_ids": pre_run_cleanup_result["canary_repair_removed_ids"],
+            "post_run_task_truth_removed": post_run_task_truth_removed,
+            "post_run_main_executor_removed_ids": post_run_cleanup_result["main_executor_removed_ids"],
+            "post_run_main_repair_removed_ids": post_run_cleanup_result["main_repair_removed_ids"],
+            "post_run_canary_executor_removed_ids": post_run_cleanup_result["canary_executor_removed_ids"],
+            "post_run_canary_repair_removed_ids": post_run_cleanup_result["canary_repair_removed_ids"],
+        }
 
         result = {
             "synced_files": synced_files,
             "executor_service_install_status": executor_service_install_status,
             "repair_service_install_status": repair_service_install_status,
             "preseed_task": preseed_task,
+            "executor_stream_key": CANARY_EXECUTOR_STREAM,
+            "repair_stream_key": CANARY_REPAIR_STREAM,
+            "cleanup_result": cleanup_result,
             "active_executor": active_executor,
             "active_repair": active_repair,
             "baseline_exec_len": baseline_exec_len,
@@ -461,6 +584,13 @@ sleep 5
             "final_repair_len": final_repair_len,
             "final_task": final_task,
             "latest_repair_entries": latest_repair_entries,
+            "post_cleanup_main_executor": post_cleanup_main_executor,
+            "post_cleanup_main_repair": post_cleanup_main_repair,
+            "post_cleanup_canary_executor": post_cleanup_canary_executor,
+            "post_cleanup_canary_repair": post_cleanup_canary_repair,
+            "restored_executor": restored_executor,
+            "restored_repair": restored_repair,
+            "executor_silence_logs": executor_silence_logs,
             "executor_logs": executor_logs,
             "repair_logs": repair_logs,
             "canary_task_uuid": CANARY_TASK_UUID,
@@ -474,18 +604,7 @@ sleep 5
         return 0
     finally:
         delete_remote_canary_task()
-        remote_bash(
-            f"""
-set +e
-cd {REMOTE_ROOT}
-if [ -f .env.worker.repair-systemd-canary.bak ]; then
-  mv .env.worker.repair-systemd-canary.bak .env.worker
-fi
-rm -f sitecustomize.py
-sudo systemctl restart furun-spot-executor.service
-sudo systemctl restart furun-spot-repair.service
-"""
-        )
+        restore_remote_runtime_assets()
 
 
 if __name__ == "__main__":
