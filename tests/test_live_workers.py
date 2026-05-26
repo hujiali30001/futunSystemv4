@@ -147,6 +147,29 @@ class FakeTaskRepository:
         self.cooldowns = []
         self.exhausted = []
 
+    def _build_updated_task(self, task_uuid: str, **updates):
+        source = self.tasks_by_uuid.get(task_uuid)
+        if source is None:
+            source = next(
+                (
+                    item
+                    for item in self.executable_tasks
+                    if str(getattr(item, "task_uuid", "")) == task_uuid
+                ),
+                None,
+            )
+        values = {}
+        if source is not None:
+            values.update(
+                {
+                    name: getattr(source, name)
+                    for name in dir(source)
+                    if not name.startswith("_") and not callable(getattr(source, name))
+                }
+            )
+        values.update(updates)
+        return type("UpdatedTask", (), values)()
+
     def create_task(self, data):
         self.created.append(data)
         task_uuid = self.generated_task_uuids.pop(0)
@@ -196,7 +219,15 @@ class FakeTaskRepository:
         self.retry_marked.append(
             {"task_uuid": task_uuid, "failure_reason": failure_reason}
         )
-        return None
+        source = self.tasks_by_uuid.get(task_uuid)
+        retry_count = int(getattr(source, "retry_count", 0) or 0) + 1
+        return self._build_updated_task(
+            task_uuid,
+            failure_reason=failure_reason,
+            retry_count=retry_count,
+            auto_recovery_status="RETRY_PENDING",
+            cooldown_until=None,
+        )
 
     def mark_auto_recovery_cooldown(
         self,
@@ -212,11 +243,21 @@ class FakeTaskRepository:
                 "cooldown_until": cooldown_until,
             }
         )
-        return None
+        return self._build_updated_task(
+            task_uuid,
+            failure_reason=failure_reason,
+            auto_recovery_status="COOLDOWN",
+            cooldown_until=cooldown_until,
+        )
 
     def mark_auto_recovery_exhausted(self, task_uuid: str, *, failure_reason: str):
         self.exhausted.append({"task_uuid": task_uuid, "failure_reason": failure_reason})
-        return None
+        return self._build_updated_task(
+            task_uuid,
+            failure_reason=failure_reason,
+            auto_recovery_status="EXHAUSTED",
+            cooldown_until=None,
+        )
 
 
 class FakeArbitrageDispatchRepository(FakeTaskRepository):
@@ -5870,3 +5911,293 @@ async def test_arbitrage_execution_consumer_emits_task_failed_event_for_non_repa
     assert failed_event.payload["task_uuid"] == "arb-close-evt-1"
     assert failed_event.payload["failed_exchanges"] == ["binance", "okx"]
     assert failed_event.payload["error"] == "FAILED"
+
+
+@pytest.mark.asyncio
+async def test_arbitrage_execution_consumer_emits_retry_scheduled_event_after_retry_transition():
+    repository = FakeTaskRepository(task_uuid="arb-close-retry-evt")
+    task = type(
+        "Task",
+        (),
+        {
+            "task_uuid": "arb-close-retry-evt",
+            "user_id": 42,
+            "task_type": "close",
+            "symbol": "BTC/USDT",
+            "spot_exchange": "binance",
+            "derivative_exchange": "okx",
+            "target_notional": 100.0,
+            "retry_count": 0,
+            "max_retry_count": 2,
+            "auto_recovery_status": "NONE",
+            "failure_reason": None,
+            "cooldown_until": None,
+        },
+    )()
+    repository.executable_tasks = [task]
+    repository.tasks_by_uuid[str(task.task_uuid)] = task
+    router = FakeEventRouter()
+    consumer = ArbitrageExecutionTaskConsumer(
+        task_repository=repository,
+        execution_adapter=ArbitrageExecutionAdapterStub(
+            result=type(
+                "ExecutionSummary",
+                (),
+                {
+                    "ok": False,
+                    "execution_status": "FAILED",
+                    "filled_exchanges": [],
+                    "failed_exchanges": ["binance", "okx"],
+                },
+            )()
+        ),
+        repair_service=FakeRepairExecutionService(result=None),
+        account_repository=FakeAccountRepository(
+            {
+                "42": [
+                    FakeExchangeAccount(account_id=11, exchange="binance"),
+                    FakeExchangeAccount(account_id=12, exchange="okx"),
+                ]
+            }
+        ),
+        worker_node_id="node-a",
+        env_mode="testnet",
+        event_router=router,
+        region="node-a",
+    )
+
+    processed = await consumer.run_once(
+        credentials_by_exchange={"binance": object(), "okx": object()},
+        proxies_by_exchange={"binance": {}, "okx": {}},
+    )
+
+    assert processed == 1
+    event = _find_event(router.events, "arb.recovery.retry_scheduled")
+    assert event.service == "arb_executor"
+    assert event.level == "INFO"
+    assert event.payload["task_uuid"] == "arb-close-retry-evt"
+    assert event.payload["failure_reason"] == "execution_failed_non_repairable"
+    assert event.payload["retry_count"] == 1
+    assert event.payload["max_retry_count"] == 2
+    assert event.payload["auto_recovery_status"] == "RETRY_PENDING"
+    assert event.payload["next_action"] == "RETRY_PENDING"
+
+
+@pytest.mark.asyncio
+async def test_arbitrage_execution_consumer_emits_cooldown_started_event_after_cooldown_transition():
+    repository = FakeTaskRepository(task_uuid="arb-close-cooldown-evt")
+    task = type(
+        "Task",
+        (),
+        {
+            "task_uuid": "arb-close-cooldown-evt",
+            "user_id": 42,
+            "task_type": "close",
+            "symbol": "BTC/USDT",
+            "spot_exchange": "binance",
+            "derivative_exchange": "okx",
+            "target_notional": 100.0,
+            "retry_count": 2,
+            "max_retry_count": 2,
+            "auto_recovery_status": "NONE",
+            "failure_reason": None,
+            "cooldown_until": None,
+        },
+    )()
+    repository.executable_tasks = [task]
+    repository.tasks_by_uuid[str(task.task_uuid)] = task
+    router = FakeEventRouter()
+    consumer = ArbitrageExecutionTaskConsumer(
+        task_repository=repository,
+        execution_adapter=ArbitrageExecutionAdapterStub(
+            result=type(
+                "ExecutionSummary",
+                (),
+                {
+                    "ok": False,
+                    "execution_status": "FAILED",
+                    "filled_exchanges": [],
+                    "failed_exchanges": ["binance", "okx"],
+                },
+            )()
+        ),
+        repair_service=FakeRepairExecutionService(result=None),
+        account_repository=FakeAccountRepository(
+            {
+                "42": [
+                    FakeExchangeAccount(account_id=11, exchange="binance"),
+                    FakeExchangeAccount(account_id=12, exchange="okx"),
+                ]
+            }
+        ),
+        worker_node_id="node-a",
+        env_mode="testnet",
+        event_router=router,
+        region="node-a",
+    )
+
+    processed = await consumer.run_once(
+        credentials_by_exchange={"binance": object(), "okx": object()},
+        proxies_by_exchange={"binance": {}, "okx": {}},
+    )
+
+    assert processed == 1
+    event = _find_event(router.events, "arb.recovery.cooldown_started")
+    assert event.service == "arb_executor"
+    assert event.level == "INFO"
+    assert event.payload["task_uuid"] == "arb-close-cooldown-evt"
+    assert event.payload["failure_reason"] == "execution_failed_non_repairable"
+    assert event.payload["retry_count"] == 2
+    assert event.payload["max_retry_count"] == 2
+    assert event.payload["auto_recovery_status"] == "COOLDOWN"
+    assert event.payload["cooldown_until"] is not None
+    assert event.payload["next_action"] == "COOLDOWN"
+
+
+@pytest.mark.asyncio
+async def test_arbitrage_execution_consumer_emits_exhausted_event_after_exhausted_transition():
+    repository = FakeTaskRepository(task_uuid="arb-close-exhausted-evt")
+    task = type(
+        "Task",
+        (),
+        {
+            "task_uuid": "arb-close-exhausted-evt",
+            "user_id": 42,
+            "task_type": "close",
+            "symbol": "BTC/USDT",
+            "spot_exchange": "binance",
+            "derivative_exchange": "okx",
+            "target_notional": 100.0,
+            "retry_count": 2,
+            "max_retry_count": 2,
+            "auto_recovery_status": "COOLDOWN",
+            "failure_reason": "execution_failed_non_repairable",
+            "cooldown_until": None,
+        },
+    )()
+    repository.executable_tasks = [task]
+    repository.tasks_by_uuid[str(task.task_uuid)] = task
+    router = FakeEventRouter()
+    consumer = ArbitrageExecutionTaskConsumer(
+        task_repository=repository,
+        execution_adapter=ArbitrageExecutionAdapterStub(
+            result=type(
+                "ExecutionSummary",
+                (),
+                {
+                    "ok": False,
+                    "execution_status": "FAILED",
+                    "filled_exchanges": [],
+                    "failed_exchanges": ["binance", "okx"],
+                },
+            )()
+        ),
+        repair_service=FakeRepairExecutionService(result=None),
+        account_repository=FakeAccountRepository(
+            {
+                "42": [
+                    FakeExchangeAccount(account_id=11, exchange="binance"),
+                    FakeExchangeAccount(account_id=12, exchange="okx"),
+                ]
+            }
+        ),
+        worker_node_id="node-a",
+        env_mode="testnet",
+        event_router=router,
+        region="node-a",
+    )
+
+    processed = await consumer.run_once(
+        credentials_by_exchange={"binance": object(), "okx": object()},
+        proxies_by_exchange={"binance": {}, "okx": {}},
+    )
+
+    assert processed == 1
+    event = _find_event(router.events, "arb.recovery.exhausted")
+    assert event.service == "arb_executor"
+    assert event.level == "ERROR"
+    assert event.payload["task_uuid"] == "arb-close-exhausted-evt"
+    assert event.payload["failure_reason"] == "execution_failed_non_repairable"
+    assert event.payload["retry_count"] == 2
+    assert event.payload["max_retry_count"] == 2
+    assert event.payload["auto_recovery_status"] == "EXHAUSTED"
+    assert event.payload["next_action"] == "EXHAUSTED"
+
+
+@pytest.mark.asyncio
+async def test_arbitrage_execution_consumer_emits_retry_scheduled_event_for_failed_repair():
+    repository = FakeTaskRepository(task_uuid="arb-open-repair-retry-evt")
+    task = type(
+        "Task",
+        (),
+        {
+            "task_uuid": "arb-open-repair-retry-evt",
+            "user_id": 42,
+            "task_type": "open",
+            "symbol": "BTC/USDT",
+            "spot_exchange": "binance",
+            "derivative_exchange": "okx",
+            "target_notional": 100.0,
+            "retry_count": 0,
+            "max_retry_count": 2,
+            "auto_recovery_status": "NONE",
+            "failure_reason": None,
+            "cooldown_until": None,
+        },
+    )()
+    repository.executable_tasks = [task]
+    repository.tasks_by_uuid[str(task.task_uuid)] = task
+    router = FakeEventRouter()
+    consumer = ArbitrageExecutionTaskConsumer(
+        task_repository=repository,
+        execution_adapter=ArbitrageExecutionAdapterStub(
+            result=type(
+                "ExecutionSummary",
+                (),
+                {
+                    "ok": False,
+                    "execution_status": "OPEN_PARTIAL",
+                    "filled_exchanges": ["binance"],
+                    "failed_exchanges": ["okx"],
+                },
+            )()
+        ),
+        repair_service=FakeRepairExecutionService(
+            result=type(
+                "RepairResult",
+                (),
+                {
+                    "ok": False,
+                    "status": "MANUAL_REQUIRED",
+                    "target_exchanges": ["okx"],
+                    "repaired_exchanges": [],
+                    "remaining_failed_exchanges": ["okx"],
+                    "reason": "repair order failed",
+                },
+            )()
+        ),
+        account_repository=FakeAccountRepository(
+            {
+                "42": [
+                    FakeExchangeAccount(account_id=11, exchange="binance"),
+                    FakeExchangeAccount(account_id=12, exchange="okx"),
+                ]
+            }
+        ),
+        worker_node_id="node-a",
+        env_mode="testnet",
+        event_router=router,
+        region="node-a",
+    )
+
+    processed = await consumer.run_once(
+        credentials_by_exchange={"binance": object(), "okx": object()},
+        proxies_by_exchange={"binance": {}, "okx": {}},
+    )
+
+    assert processed == 1
+    event = _find_event(router.events, "arb.recovery.retry_scheduled")
+    assert event.payload["task_uuid"] == "arb-open-repair-retry-evt"
+    assert event.payload["failure_reason"] == "repair_failed_manual_required"
+    assert event.payload["auto_recovery_status"] == "RETRY_PENDING"
+    assert event.payload["next_action"] == "RETRY_PENDING"

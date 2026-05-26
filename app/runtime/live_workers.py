@@ -375,6 +375,106 @@ def _build_arb_repair_finished_event(
     )
 
 
+def _build_arb_recovery_retry_scheduled_event(
+    *,
+    region: str,
+    task,
+) -> RuntimeEvent:
+    return RuntimeEvent(
+        event_type="arb.recovery.retry_scheduled",
+        level="INFO",
+        service="arb_executor",
+        region=region,
+        symbol=str(task.symbol),
+        exchange=str(task.spot_exchange),
+        exchanges=[str(task.spot_exchange), str(task.derivative_exchange)],
+        message="arbitrage recovery retry scheduled",
+        payload={
+            "task_uuid": str(task.task_uuid),
+            "user_id": str(task.user_id),
+            "symbol": str(task.symbol),
+            "task_type": str(task.task_type),
+            "spot_exchange": str(task.spot_exchange),
+            "derivative_exchange": str(task.derivative_exchange),
+            "failure_reason": getattr(task, "failure_reason", None),
+            "retry_count": int(getattr(task, "retry_count", 0) or 0),
+            "max_retry_count": int(getattr(task, "max_retry_count", 0) or 0),
+            "auto_recovery_status": str(
+                getattr(task, "auto_recovery_status", "NONE") or "NONE"
+            ),
+            "next_action": "RETRY_PENDING",
+        },
+    )
+
+
+def _build_arb_recovery_cooldown_started_event(
+    *,
+    region: str,
+    task,
+) -> RuntimeEvent:
+    cooldown_until = getattr(task, "cooldown_until", None)
+    return RuntimeEvent(
+        event_type="arb.recovery.cooldown_started",
+        level="INFO",
+        service="arb_executor",
+        region=region,
+        symbol=str(task.symbol),
+        exchange=str(task.spot_exchange),
+        exchanges=[str(task.spot_exchange), str(task.derivative_exchange)],
+        message="arbitrage recovery cooldown started",
+        payload={
+            "task_uuid": str(task.task_uuid),
+            "user_id": str(task.user_id),
+            "symbol": str(task.symbol),
+            "task_type": str(task.task_type),
+            "spot_exchange": str(task.spot_exchange),
+            "derivative_exchange": str(task.derivative_exchange),
+            "failure_reason": getattr(task, "failure_reason", None),
+            "retry_count": int(getattr(task, "retry_count", 0) or 0),
+            "max_retry_count": int(getattr(task, "max_retry_count", 0) or 0),
+            "auto_recovery_status": str(
+                getattr(task, "auto_recovery_status", "NONE") or "NONE"
+            ),
+            "cooldown_until": (
+                cooldown_until.isoformat() if cooldown_until is not None else None
+            ),
+            "next_action": "COOLDOWN",
+        },
+    )
+
+
+def _build_arb_recovery_exhausted_event(
+    *,
+    region: str,
+    task,
+) -> RuntimeEvent:
+    return RuntimeEvent(
+        event_type="arb.recovery.exhausted",
+        level="ERROR",
+        service="arb_executor",
+        region=region,
+        symbol=str(task.symbol),
+        exchange=str(task.spot_exchange),
+        exchanges=[str(task.spot_exchange), str(task.derivative_exchange)],
+        message="arbitrage recovery exhausted",
+        payload={
+            "task_uuid": str(task.task_uuid),
+            "user_id": str(task.user_id),
+            "symbol": str(task.symbol),
+            "task_type": str(task.task_type),
+            "spot_exchange": str(task.spot_exchange),
+            "derivative_exchange": str(task.derivative_exchange),
+            "failure_reason": getattr(task, "failure_reason", None),
+            "retry_count": int(getattr(task, "retry_count", 0) or 0),
+            "max_retry_count": int(getattr(task, "max_retry_count", 0) or 0),
+            "auto_recovery_status": str(
+                getattr(task, "auto_recovery_status", "NONE") or "NONE"
+            ),
+            "next_action": "EXHAUSTED",
+        },
+    )
+
+
 def _build_arb_dispatcher_user_discovered_event(
     *,
     region: str,
@@ -849,29 +949,51 @@ class ArbitrageExecutionTaskConsumer:
             )
         return execution_accounts
 
-    def _apply_auto_recovery(self, *, task, failure_reason: str) -> None:
+    async def _apply_auto_recovery(self, *, task, failure_reason: str) -> None:
         decision = _decide_arbitrage_auto_recovery(
             task=task,
             failure_reason=failure_reason,
             cooldown_seconds=self.auto_recovery_cooldown_seconds,
         )
+        updated_task = None
         if decision.action == "RETRY_PENDING":
-            self.task_repository.mark_auto_recovery_retry(
+            updated_task = self.task_repository.mark_auto_recovery_retry(
                 str(task.task_uuid),
                 failure_reason=decision.failure_reason,
             )
+            if self.event_router is not None and updated_task is not None:
+                await self.event_router.dispatch(
+                    _build_arb_recovery_retry_scheduled_event(
+                        region=self.region,
+                        task=updated_task,
+                    )
+                )
             return
         if decision.action == "COOLDOWN":
-            self.task_repository.mark_auto_recovery_cooldown(
+            updated_task = self.task_repository.mark_auto_recovery_cooldown(
                 str(task.task_uuid),
                 failure_reason=decision.failure_reason,
                 cooldown_until=decision.cooldown_until,
             )
+            if self.event_router is not None and updated_task is not None:
+                await self.event_router.dispatch(
+                    _build_arb_recovery_cooldown_started_event(
+                        region=self.region,
+                        task=updated_task,
+                    )
+                )
             return
-        self.task_repository.mark_auto_recovery_exhausted(
+        updated_task = self.task_repository.mark_auto_recovery_exhausted(
             str(task.task_uuid),
             failure_reason=decision.failure_reason,
         )
+        if self.event_router is not None and updated_task is not None:
+            await self.event_router.dispatch(
+                _build_arb_recovery_exhausted_event(
+                    region=self.region,
+                    task=updated_task,
+                )
+            )
 
     async def _run_repair(
         self,
@@ -948,7 +1070,7 @@ class ArbitrageExecutionTaskConsumer:
                     result=repair_result,
                 )
             )
-        self._apply_auto_recovery(
+        await self._apply_auto_recovery(
             task=task,
             failure_reason="repair_failed_manual_required",
         )
@@ -1024,7 +1146,7 @@ class ArbitrageExecutionTaskConsumer:
                         result=result,
                     )
                 )
-            self._apply_auto_recovery(
+            await self._apply_auto_recovery(
                 task=task,
                 failure_reason="execution_failed_non_repairable",
             )
