@@ -543,6 +543,201 @@ class ExecutorPreflightValidator:
                     )
 
 
+class ArbitrageExecutionTaskConsumer:
+    def __init__(
+        self,
+        *,
+        task_repository,
+        execution_adapter,
+        repair_service,
+        account_repository,
+        worker_node_id: str,
+        env_mode: str = "testnet",
+        risk_manager: RiskManager | None = None,
+    ) -> None:
+        self.task_repository = task_repository
+        self.execution_adapter = execution_adapter
+        self.repair_service = repair_service
+        self.account_repository = account_repository
+        self.worker_node_id = worker_node_id
+        self.env_mode = env_mode
+        self.risk_manager = risk_manager or RiskManager()
+
+    def _resolve_execution_exchanges(self, task) -> tuple[str, str]:
+        task_type = str(getattr(task, "task_type", "")).lower()
+        spot_exchange = str(task.spot_exchange)
+        derivative_exchange = str(task.derivative_exchange)
+        if task_type == "open":
+            return spot_exchange, derivative_exchange
+        if task_type == "close":
+            return derivative_exchange, spot_exchange
+        raise ValueError(f"unsupported task_type: {task.task_type}")
+
+    def _build_execution_accounts(self, task) -> dict[str, Any]:
+        accounts = list(
+            self.account_repository.list_enabled_accounts(
+                user_id=int(task.user_id),
+                env_mode=self.env_mode,
+            )
+            or []
+        )
+        dispatcher_region = _normalize_account_region(
+            getattr(task, "home_region", self.worker_node_id)
+        )
+        execution_accounts: dict[str, Any] = {}
+        for exchange in self._resolve_execution_exchanges(task):
+            candidates = _iter_eligible_accounts_for_exchange(
+                accounts=accounts,
+                exchange=exchange,
+                dispatcher_region=dispatcher_region,
+            )
+            if not candidates:
+                raise LookupError(f"missing execution account for exchange={exchange}")
+            execution_accounts[exchange] = min(
+                candidates,
+                key=lambda item: int(getattr(item, "id", 0)),
+            )
+        return execution_accounts
+
+    async def _run_repair(
+        self,
+        *,
+        task,
+        result,
+        credentials_by_exchange: dict[str, Any],
+        proxies_by_exchange: dict[str, dict[str, str]] | None = None,
+    ) -> None:
+        buy_exchange, sell_exchange = self._resolve_execution_exchanges(task)
+        failed_exchanges = list(getattr(result, "failed_exchanges", []) or [])
+        filled_exchanges = list(getattr(result, "filled_exchanges", []) or [])
+        repair_plan = self.risk_manager.build_repair_plan(
+            ExecutionResult(
+                status=str(getattr(result, "execution_status", "") or ""),
+                filled_exchanges=filled_exchanges,
+                failed_exchanges=failed_exchanges,
+            )
+        )
+        repair_result = await self.repair_service.run_task(
+            task_uuid=str(task.task_uuid),
+            symbol=str(task.symbol),
+            buy_exchange=buy_exchange,
+            sell_exchange=sell_exchange,
+            target_exchanges=failed_exchanges,
+            credentials_by_exchange=credentials_by_exchange,
+            target_quote_amount=float(task.target_notional),
+            env_mode=self.env_mode,
+            proxies_by_exchange=proxies_by_exchange,
+        )
+        if getattr(repair_result, "ok", False):
+            repaired_exchanges = list(
+                getattr(repair_result, "repaired_exchanges", []) or []
+            )
+            self.task_repository.mark_repair_result(
+                str(task.task_uuid),
+                lifecycle_status="SUCCEEDED",
+                execution_status="OPEN_HEDGED",
+                filled_exchanges=list(dict.fromkeys(filled_exchanges + repaired_exchanges)),
+                failed_exchanges=[],
+                repair_action=repair_plan.action,
+                repair_reason="repair_succeeded",
+                status_reason=None,
+            )
+            return
+
+        remaining_failed_exchanges = list(
+            getattr(repair_result, "remaining_failed_exchanges", []) or failed_exchanges
+        )
+        self.task_repository.mark_repair_result(
+            str(task.task_uuid),
+            lifecycle_status="FAILED",
+            execution_status="OPEN_PARTIAL",
+            filled_exchanges=[
+                exchange
+                for exchange in (buy_exchange, sell_exchange)
+                if exchange not in remaining_failed_exchanges
+            ],
+            failed_exchanges=remaining_failed_exchanges,
+            repair_action=repair_plan.action,
+            repair_reason=repair_plan.reason,
+            status_reason="manual_required",
+        )
+
+    async def run_once(
+        self,
+        *,
+        credentials_by_exchange: dict[str, Any],
+        proxies_by_exchange: dict[str, dict[str, str]] | None = None,
+    ) -> int:
+        tasks = self.task_repository.list_executable_tasks(
+            env_mode=self.env_mode,
+            limit=1,
+        )
+        if not tasks:
+            return 0
+
+        task = tasks[0]
+        try:
+            self.task_repository.mark_executing(
+                str(task.task_uuid),
+                worker_node_id=self.worker_node_id,
+            )
+            execution_accounts = self._build_execution_accounts(task)
+            result = await self.execution_adapter.execute_task(
+                task=task,
+                credentials_by_exchange=credentials_by_exchange,
+                execution_accounts_by_exchange=execution_accounts,
+                env_mode=self.env_mode,
+                proxies_by_exchange=proxies_by_exchange,
+            )
+            execution_status = str(
+                getattr(result, "execution_status", "FAILED") or "FAILED"
+            )
+            filled_exchanges = list(getattr(result, "filled_exchanges", []) or [])
+            failed_exchanges = list(getattr(result, "failed_exchanges", []) or [])
+            repair_plan = self.risk_manager.build_repair_plan(
+                ExecutionResult(
+                    status=execution_status,
+                    filled_exchanges=filled_exchanges,
+                    failed_exchanges=failed_exchanges,
+                )
+            )
+            if getattr(result, "ok", False):
+                self.task_repository.mark_execution_result(
+                    str(task.task_uuid),
+                    lifecycle_status="SUCCEEDED",
+                    execution_status=execution_status,
+                    filled_exchanges=filled_exchanges,
+                    failed_exchanges=failed_exchanges,
+                    repair_action=repair_plan.action,
+                    repair_reason=repair_plan.reason,
+                )
+                return 1
+            if execution_status == "OPEN_PARTIAL" and failed_exchanges:
+                await self._run_repair(
+                    task=task,
+                    result=result,
+                    credentials_by_exchange=credentials_by_exchange,
+                    proxies_by_exchange=proxies_by_exchange,
+                )
+                return 1
+            self.task_repository.mark_execution_result(
+                str(task.task_uuid),
+                lifecycle_status="FAILED",
+                execution_status=execution_status,
+                filled_exchanges=filled_exchanges,
+                failed_exchanges=failed_exchanges,
+                repair_action=repair_plan.action,
+                repair_reason=repair_plan.reason,
+            )
+            return 1
+        except Exception as exc:
+            self.task_repository.mark_failed(
+                str(task.task_uuid),
+                reason=getattr(exc, "reason", str(exc)),
+            )
+            return 0
+
+
 class ContinuousSpotScanner:
     def __init__(
         self,

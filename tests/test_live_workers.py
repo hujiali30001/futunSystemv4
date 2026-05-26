@@ -8,6 +8,7 @@ from app.runtime.executor_account_truth import (
     ExecutorAccountTruthResolver,
 )
 from app.runtime.live_workers import (
+    ArbitrageExecutionTaskConsumer,
     ContinuousSpotScanner,
     ExecutorPreflightError,
     ExecutorPreflightValidator,
@@ -116,10 +117,23 @@ class FakeRepairExecutionService:
         return self.result
 
 
+class ArbitrageExecutionAdapterStub:
+    def __init__(self, *, result):
+        self.result = result
+        self.calls = []
+
+    async def execute_task(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.result
+
+
 class FakeTaskRepository:
     def __init__(self, *, task_uuid: str):
         self.task_uuid = task_uuid
         self.generated_task_uuids = [task_uuid]
+        self.tasks_by_uuid = {}
+        self.executable_tasks = []
+        self.list_executable_calls = []
         self.created = []
         self.dispatched = []
         self.executing = []
@@ -133,6 +147,10 @@ class FakeTaskRepository:
         self.created.append(data)
         task_uuid = self.generated_task_uuids.pop(0)
         return type("TaskRecord", (), {"task_uuid": task_uuid})()
+
+    def list_executable_tasks(self, *, env_mode: str, limit: int = 100):
+        self.list_executable_calls.append({"env_mode": env_mode, "limit": limit})
+        return list(self.executable_tasks[:limit])
 
     def mark_dispatched(self, task_uuid: str, *, worker_node_id: str):
         self.dispatched.append((task_uuid, worker_node_id))
@@ -5132,3 +5150,242 @@ async def test_executor_emits_control_rule_resized_event():
     assert router.events[0].payload["requested_notional"] == 40.0
     assert router.events[0].payload["approved_notional"] == 18.0
     assert router.events[0].payload["reason"] == "limit_rule_applied"
+
+
+@pytest.mark.asyncio
+async def test_arbitrage_execution_consumer_marks_open_task_succeeded_after_adapter_success():
+    repository = FakeTaskRepository(task_uuid="arb-open-1")
+    task = type(
+        "Task",
+        (),
+        {
+            "task_uuid": "arb-open-1",
+            "user_id": 42,
+            "task_type": "open",
+            "symbol": "BTC/USDT",
+            "spot_exchange": "binance",
+            "derivative_exchange": "okx",
+            "target_notional": 100.0,
+        },
+    )()
+    repository.executable_tasks = [task]
+    account_repository = FakeAccountRepository(
+        {
+            "42": [
+                FakeExchangeAccount(account_id=11, exchange="binance"),
+                FakeExchangeAccount(account_id=12, exchange="okx"),
+            ]
+        }
+    )
+    execution_adapter = ArbitrageExecutionAdapterStub(
+        result=type(
+            "ExecutionSummary",
+            (),
+            {
+                "ok": True,
+                "execution_status": "OPEN_HEDGED",
+                "filled_exchanges": ["binance", "okx"],
+                "failed_exchanges": [],
+            },
+        )()
+    )
+    consumer = ArbitrageExecutionTaskConsumer(
+        task_repository=repository,
+        execution_adapter=execution_adapter,
+        repair_service=FakeRepairExecutionService(result=None),
+        account_repository=account_repository,
+        worker_node_id="node-a",
+        env_mode="testnet",
+    )
+
+    processed = await consumer.run_once(
+        credentials_by_exchange={"binance": object(), "okx": object()},
+        proxies_by_exchange={"binance": {"http": "http://proxy-a"}, "okx": {}},
+    )
+
+    assert processed == 1
+    assert repository.list_executable_calls == [{"env_mode": "testnet", "limit": 1}]
+    assert repository.executing == [("arb-open-1", "node-a")]
+    assert account_repository.calls == [{"user_id": 42, "env_mode": "testnet"}]
+    assert execution_adapter.calls[0]["task"] is task
+    assert execution_adapter.calls[0]["execution_accounts_by_exchange"] == {
+        "binance": account_repository.accounts_by_user_id["42"][0],
+        "okx": account_repository.accounts_by_user_id["42"][1],
+    }
+    assert repository.execution_results == [
+        (
+            "arb-open-1",
+            {
+                "lifecycle_status": "SUCCEEDED",
+                "execution_status": "OPEN_HEDGED",
+                "filled_exchanges": ["binance", "okx"],
+                "failed_exchanges": [],
+                "repair_action": "NONE",
+                "repair_reason": "fully_hedged",
+            },
+        )
+    ]
+    assert repository.repair_results == []
+
+
+@pytest.mark.asyncio
+async def test_arbitrage_execution_consumer_marks_repair_result_for_open_partial_with_failed_exchanges():
+    repository = FakeTaskRepository(task_uuid="arb-open-2")
+    task = type(
+        "Task",
+        (),
+        {
+            "task_uuid": "arb-open-2",
+            "user_id": 42,
+            "task_type": "open",
+            "symbol": "BTC/USDT",
+            "spot_exchange": "binance",
+            "derivative_exchange": "okx",
+            "target_notional": 100.0,
+        },
+    )()
+    repository.executable_tasks = [task]
+    repair_service = FakeRepairExecutionService(
+        result=type(
+            "RepairResult",
+            (),
+            {
+                "ok": True,
+                "status": "REPAIRED",
+                "task_uuid": "arb-open-2",
+                "target_exchanges": ["okx"],
+                "repaired_exchanges": ["okx"],
+                "remaining_failed_exchanges": [],
+                "reason": None,
+            },
+        )()
+    )
+    consumer = ArbitrageExecutionTaskConsumer(
+        task_repository=repository,
+        execution_adapter=ArbitrageExecutionAdapterStub(
+            result=type(
+                "ExecutionSummary",
+                (),
+                {
+                    "ok": False,
+                    "execution_status": "OPEN_PARTIAL",
+                    "filled_exchanges": ["binance"],
+                    "failed_exchanges": ["okx"],
+                },
+            )()
+        ),
+        repair_service=repair_service,
+        account_repository=FakeAccountRepository(
+            {
+                "42": [
+                    FakeExchangeAccount(account_id=11, exchange="binance"),
+                    FakeExchangeAccount(account_id=12, exchange="okx"),
+                ]
+            }
+        ),
+        worker_node_id="node-a",
+        env_mode="testnet",
+    )
+    credentials_by_exchange = {"binance": object(), "okx": object()}
+    proxies_by_exchange = {"binance": {}, "okx": {}}
+
+    processed = await consumer.run_once(
+        credentials_by_exchange=credentials_by_exchange,
+        proxies_by_exchange=proxies_by_exchange,
+    )
+
+    assert processed == 1
+    assert repair_service.calls == [
+        {
+            "task_uuid": "arb-open-2",
+            "symbol": "BTC/USDT",
+            "buy_exchange": "binance",
+            "sell_exchange": "okx",
+            "target_exchanges": ["okx"],
+            "credentials_by_exchange": credentials_by_exchange,
+            "target_quote_amount": 100.0,
+            "env_mode": "testnet",
+            "proxies_by_exchange": proxies_by_exchange,
+        }
+    ]
+    assert repository.execution_results == []
+    assert repository.repair_results == [
+        {
+            "task_uuid": "arb-open-2",
+            "lifecycle_status": "SUCCEEDED",
+            "execution_status": "OPEN_HEDGED",
+            "filled_exchanges": ["binance", "okx"],
+            "failed_exchanges": [],
+            "repair_action": "AUTO_HEDGE_REPAIRING",
+            "repair_reason": "repair_succeeded",
+            "status_reason": None,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_arbitrage_execution_consumer_marks_failed_for_non_repairable_result():
+    repository = FakeTaskRepository(task_uuid="arb-close-1")
+    task = type(
+        "Task",
+        (),
+        {
+            "task_uuid": "arb-close-1",
+            "user_id": 42,
+            "task_type": "close",
+            "symbol": "BTC/USDT",
+            "spot_exchange": "binance",
+            "derivative_exchange": "okx",
+            "target_notional": 100.0,
+        },
+    )()
+    repository.executable_tasks = [task]
+    execution_adapter = ArbitrageExecutionAdapterStub(
+        result=type(
+            "ExecutionSummary",
+            (),
+            {
+                "ok": False,
+                "execution_status": "FAILED",
+                "filled_exchanges": [],
+                "failed_exchanges": ["binance", "okx"],
+            },
+        )()
+    )
+    consumer = ArbitrageExecutionTaskConsumer(
+        task_repository=repository,
+        execution_adapter=execution_adapter,
+        repair_service=FakeRepairExecutionService(result=None),
+        account_repository=FakeAccountRepository(
+            {
+                "42": [
+                    FakeExchangeAccount(account_id=11, exchange="binance"),
+                    FakeExchangeAccount(account_id=12, exchange="okx"),
+                ]
+            }
+        ),
+        worker_node_id="node-a",
+        env_mode="testnet",
+    )
+
+    processed = await consumer.run_once(
+        credentials_by_exchange={"binance": object(), "okx": object()},
+        proxies_by_exchange={"binance": {}, "okx": {}},
+    )
+
+    assert processed == 1
+    assert execution_adapter.calls[0]["task"] is task
+    assert repository.execution_results == [
+        (
+            "arb-close-1",
+            {
+                "lifecycle_status": "FAILED",
+                "execution_status": "FAILED",
+                "filled_exchanges": [],
+                "failed_exchanges": ["binance", "okx"],
+                "repair_action": "NONE",
+                "repair_reason": "fully_hedged",
+            },
+        )
+    ]
+    assert repository.repair_results == []
