@@ -78,7 +78,12 @@ class ExchangeClientFactory:
                 config["password"] = credentials.password
 
         client = exchange_class(config)
-        if env_mode == "testnet" and hasattr(client, "set_sandbox_mode"):
+        if env_mode == "testnet" and exchange == "bybit" and hasattr(client, "urls"):
+            client.urls["api"] = {
+                "public": "https://api-demo.bybit.com",
+                "private": "https://api-demo.bybit.com",
+            }
+        elif env_mode == "testnet" and hasattr(client, "set_sandbox_mode"):
             client.set_sandbox_mode(True)
         return ExchangeAccountSession(
             exchange=exchange,

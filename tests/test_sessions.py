@@ -122,6 +122,7 @@ def test_exchange_factory_creates_bybit_session():
         def __init__(self, config):
             self.config = config
             self.sandbox_enabled = False
+            self.urls = {"api": {"public": "", "private": ""}}
 
         def set_sandbox_mode(self, enabled):
             self.sandbox_enabled = enabled
@@ -143,7 +144,8 @@ def test_exchange_factory_creates_bybit_session():
     assert session.exchange == "bybit"
     assert session.env_mode == "testnet"
     assert session.client.config["apiKey"] == "bybit-key"
-    assert session.client.sandbox_enabled is True
+    assert session.client.sandbox_enabled is False
+    assert session.client.urls["api"]["public"] == "https://api-demo.bybit.com"
 
 
 def test_exchange_factory_creates_all_five_sessions():
