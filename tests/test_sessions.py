@@ -151,6 +151,40 @@ def test_exchange_factory_creates_bybit_session():
     assert session.client.demo_enabled is True
 
 
+def test_exchange_factory_creates_binance_demo_session():
+    class FakeExchangeClient:
+        def __init__(self, config):
+            self.config = config
+            self.sandbox_enabled = False
+            self.demo_enabled = False
+
+        def set_sandbox_mode(self, enabled):
+            self.sandbox_enabled = enabled
+
+        def enable_demo_trading(self, enabled):
+            self.demo_enabled = enabled
+
+    class FakeCcxtModule:
+        binance = FakeExchangeClient
+
+    factory = ExchangeClientFactory(ccxt_module=FakeCcxtModule())
+    session = factory.create_session(
+        exchange="binance",
+        env_mode="testnet",
+        proxies={},
+        credentials=ExchangeCredentials(
+            api_key="binance-key",
+            secret="binance-secret",
+        ),
+    )
+
+    assert session.exchange == "binance"
+    assert session.env_mode == "testnet"
+    assert session.client.config["apiKey"] == "binance-key"
+    assert session.client.sandbox_enabled is False
+    assert session.client.demo_enabled is True
+
+
 def test_exchange_factory_creates_all_five_sessions():
     class FakeExchangeClient:
         def __init__(self, config):
@@ -181,7 +215,7 @@ def test_exchange_factory_creates_all_five_sessions():
             credentials=ExchangeCredentials(api_key="k", secret="s"),
         )
         assert session.exchange == exchange
-        if exchange == "bybit":
+        if exchange in ("bybit", "binance"):
             assert session.client.sandbox_enabled is False
             assert session.client.demo_enabled is True
         else:

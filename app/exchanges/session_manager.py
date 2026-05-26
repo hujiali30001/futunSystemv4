@@ -78,7 +78,8 @@ class ExchangeClientFactory:
                 config["password"] = credentials.password
 
         client = exchange_class(config)
-        if env_mode == "testnet" and exchange == "bybit" and hasattr(client, "enable_demo_trading"):
+        _use_demo = env_mode == "testnet" and exchange in {"bybit", "binance"} and hasattr(client, "enable_demo_trading")
+        if _use_demo:
             client.enable_demo_trading(True)
         elif env_mode == "testnet" and hasattr(client, "set_sandbox_mode"):
             client.set_sandbox_mode(True)
