@@ -32,6 +32,7 @@ class ExchangeAccountSession:
     markets: dict[str, Any] = field(default_factory=dict)
     client: Any = field(default=None)
     closed: bool = False
+    credentials: ExchangeCredentials | None = None
 
     async def mark_ready(self) -> None:
         if self.client is not None and hasattr(self.client, "load_markets"):
@@ -93,6 +94,7 @@ class ExchangeClientFactory:
             env_mode=env_mode,
             proxies=proxies,
             client=client,
+            credentials=credentials if demo_bybit else None,
         )
 
     @staticmethod
