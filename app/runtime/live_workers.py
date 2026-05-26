@@ -1,5 +1,6 @@
 import asyncio
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -751,6 +752,41 @@ class ExecutorPreflightValidator:
                     )
 
 
+@dataclass(slots=True)
+class ArbitrageAutoRecoveryDecision:
+    action: str
+    failure_reason: str
+    cooldown_until: datetime | None = None
+
+
+def _decide_arbitrage_auto_recovery(
+    *,
+    task,
+    failure_reason: str,
+    cooldown_seconds: int,
+) -> ArbitrageAutoRecoveryDecision:
+    retry_count = int(getattr(task, "retry_count", 0) or 0)
+    max_retry_count = int(getattr(task, "max_retry_count", 2) or 2)
+    auto_recovery_status = str(
+        getattr(task, "auto_recovery_status", "NONE") or "NONE"
+    )
+    if retry_count < max_retry_count:
+        return ArbitrageAutoRecoveryDecision(
+            action="RETRY_PENDING",
+            failure_reason=failure_reason,
+        )
+    if auto_recovery_status != "COOLDOWN":
+        return ArbitrageAutoRecoveryDecision(
+            action="COOLDOWN",
+            failure_reason=failure_reason,
+            cooldown_until=datetime.utcnow() + timedelta(seconds=cooldown_seconds),
+        )
+    return ArbitrageAutoRecoveryDecision(
+        action="EXHAUSTED",
+        failure_reason=failure_reason,
+    )
+
+
 class ArbitrageExecutionTaskConsumer:
     def __init__(
         self,
@@ -764,6 +800,7 @@ class ArbitrageExecutionTaskConsumer:
         risk_manager: RiskManager | None = None,
         event_router=None,
         region: str | None = None,
+        auto_recovery_cooldown_seconds: int = 300,
     ) -> None:
         self.task_repository = task_repository
         self.execution_adapter = execution_adapter
@@ -774,6 +811,7 @@ class ArbitrageExecutionTaskConsumer:
         self.risk_manager = risk_manager or RiskManager()
         self.event_router = event_router
         self.region = region or worker_node_id
+        self.auto_recovery_cooldown_seconds = auto_recovery_cooldown_seconds
 
     def _resolve_execution_exchanges(self, task) -> tuple[str, str]:
         task_type = str(getattr(task, "task_type", "")).lower()
@@ -810,6 +848,30 @@ class ArbitrageExecutionTaskConsumer:
                 key=lambda item: int(getattr(item, "id", 0)),
             )
         return execution_accounts
+
+    def _apply_auto_recovery(self, *, task, failure_reason: str) -> None:
+        decision = _decide_arbitrage_auto_recovery(
+            task=task,
+            failure_reason=failure_reason,
+            cooldown_seconds=self.auto_recovery_cooldown_seconds,
+        )
+        if decision.action == "RETRY_PENDING":
+            self.task_repository.mark_auto_recovery_retry(
+                str(task.task_uuid),
+                failure_reason=decision.failure_reason,
+            )
+            return
+        if decision.action == "COOLDOWN":
+            self.task_repository.mark_auto_recovery_cooldown(
+                str(task.task_uuid),
+                failure_reason=decision.failure_reason,
+                cooldown_until=decision.cooldown_until,
+            )
+            return
+        self.task_repository.mark_auto_recovery_exhausted(
+            str(task.task_uuid),
+            failure_reason=decision.failure_reason,
+        )
 
     async def _run_repair(
         self,
@@ -878,20 +940,6 @@ class ArbitrageExecutionTaskConsumer:
         remaining_failed_exchanges = list(
             getattr(repair_result, "remaining_failed_exchanges", []) or failed_exchanges
         )
-        self.task_repository.mark_repair_result(
-            str(task.task_uuid),
-            lifecycle_status="FAILED",
-            execution_status="OPEN_PARTIAL",
-            filled_exchanges=[
-                exchange
-                for exchange in (buy_exchange, sell_exchange)
-                if exchange not in remaining_failed_exchanges
-            ],
-            failed_exchanges=remaining_failed_exchanges,
-            repair_action=repair_plan.action,
-            repair_reason=repair_plan.reason,
-            status_reason="manual_required",
-        )
         if self.event_router is not None:
             await self.event_router.dispatch(
                 _build_arb_repair_finished_event(
@@ -900,6 +948,10 @@ class ArbitrageExecutionTaskConsumer:
                     result=repair_result,
                 )
             )
+        self._apply_auto_recovery(
+            task=task,
+            failure_reason="repair_failed_manual_required",
+        )
 
     async def run_once(
         self,
@@ -972,14 +1024,9 @@ class ArbitrageExecutionTaskConsumer:
                         result=result,
                     )
                 )
-            self.task_repository.mark_execution_result(
-                str(task.task_uuid),
-                lifecycle_status="FAILED",
-                execution_status=execution_status,
-                filled_exchanges=filled_exchanges,
-                failed_exchanges=failed_exchanges,
-                repair_action=repair_plan.action,
-                repair_reason=repair_plan.reason,
+            self._apply_auto_recovery(
+                task=task,
+                failure_reason="execution_failed_non_repairable",
             )
             return 1
         except Exception as exc:
