@@ -112,7 +112,7 @@ class SpotArbitrageProbeService:
                 order_type="limit",
                 amount=buy_amount,
                 price=buy_price,
-                post_only=buy_exchange in {"okx", "gate", "gateio"},
+                post_only=buy_exchange in {"okx", "binance", "bybit", "bitget", "gate", "gateio"},
             )
             sell_request = OrderRequest(
                 symbol=symbol,
@@ -120,7 +120,7 @@ class SpotArbitrageProbeService:
                 order_type="limit",
                 amount=sell_amount,
                 price=sell_price,
-                post_only=sell_exchange in {"okx", "gate", "gateio"},
+                post_only=sell_exchange in {"okx", "binance", "bybit", "bitget", "gate", "gateio"},
             )
 
             try:
