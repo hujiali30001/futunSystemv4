@@ -20,7 +20,7 @@ from app.runtime.alerting import (
 )
 from app.runtime.arbitrage_execution_adapter import ArbitrageExecutionAdapter
 from app.runtime.executor_account_truth import ExecutorAccountTruthResolver
-from app.runtime.live_spot_flow import LiveSpotFlowService
+from app.runtime.live_spot_flow import LiveSpotFlowService, SymbolDiscovery
 from app.runtime.live_workers import (
     ArbitrageExecutionTaskConsumer,
     ControlGuard,
@@ -66,10 +66,27 @@ class ScannerWorker:
         credentials_by_exchange: dict,
         proxies_by_exchange: dict,
     ) -> None:
+        symbols = self.settings.active_spot_symbols
+        auto_symbols: list[str] | None = None
+        if symbols == ["__auto__"]:
+            discovery = SymbolDiscovery(self.scanner.flow_service.session_factory)
+            auto_symbols = await discovery.discover(
+                exchanges=exchanges,
+                credentials_by_exchange=credentials_by_exchange,
+                env_mode=self.settings.env_mode,
+                proxies_by_exchange=proxies_by_exchange,
+            )
+            if not auto_symbols:
+                raise RuntimeError(
+                    "auto symbol discovery returned zero common symbols across "
+                    f"{exchanges}"
+                )
+            symbols = auto_symbols
+
         await self.scanner.run(
             exchanges=exchanges,
             credentials_by_exchange=credentials_by_exchange,
-            symbols=self.settings.active_spot_symbols,
+            symbols=symbols,
             env_mode=self.settings.env_mode,
             proxies_by_exchange=proxies_by_exchange,
             orderbook_depth_limit=self.settings.orderbook_depth_limit,

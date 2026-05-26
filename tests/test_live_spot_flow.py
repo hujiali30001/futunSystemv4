@@ -1,8 +1,8 @@
-import pytest
+﻿import pytest
 
 from app.exchanges.session_manager import ExchangeAccountSession, ExchangeCredentials
 from app.market.opportunity import SpotOpportunity, spot_opportunity_to_payload
-from app.runtime.live_spot_flow import LiveSpotFlowService
+from app.runtime.live_spot_flow import LiveSpotFlowService, SymbolDiscovery
 
 
 class FakeRedis:
@@ -286,3 +286,17 @@ async def test_live_flow_closes_created_sessions_when_fetch_fails():
     assert factory.clients["okx"].closed is True
     assert factory.clients["bitget"].closed is True
     assert factory.clients["gate"].closed is True
+
+def test_symbol_discovery_filters_usdt_spot_only():
+    discovery = SymbolDiscovery.__new__(SymbolDiscovery)
+    markets = {
+        "BTC/USDT": {"quote": "USDT", "active": True, "type": "spot", "base": "BTC"},
+        "ETH/USDT": {"quote": "USDT", "active": True, "type": "spot", "base": "ETH"},
+        "BTC/USDC": {"quote": "USDC", "active": True, "type": "spot", "base": "BTC"},
+        "SOL/USDT": {"quote": "USDT", "active": False, "type": "spot", "base": "SOL"},
+        "1000PEPE/USDT": {"quote": "USDT", "active": True, "type": "spot", "base": "1000PEPE"},
+        "1MSATS/USDT": {"quote": "USDT", "active": True, "type": "spot", "base": "1MSATS"},
+        "BTC/USDT:USDT": {"quote": "USDT", "active": True, "type": "swap", "base": "BTC"},
+    }
+    result = discovery._extract_spot_usdt_pairs(markets)
+    assert result == {"BTC/USDT", "ETH/USDT"}

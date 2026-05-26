@@ -218,3 +218,30 @@ def test_load_exchange_credentials_for_all_five(monkeypatch):
     assert set(credentials.keys()) == {"okx", "binance", "bybit", "bitget", "gate"}
     for ex in ["okx", "binance", "bybit", "bitget", "gate"]:
         assert credentials[ex].api_key == f"{ex}-key"
+
+
+def test_active_spot_symbols_returns_list_when_set():
+    settings = WorkerSettings(
+        redis_url="redis://127.0.0.1:6379/0",
+        spot_symbols="BTC/USDT,ETH/USDT,SOL/USDT",
+        worker_role="scanner",
+    )
+    assert settings.active_spot_symbols == ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
+
+
+def test_active_spot_symbols_falls_back_to_single_symbol():
+    settings = WorkerSettings(
+        redis_url="redis://127.0.0.1:6379/0",
+        spot_symbol="ETH/USDT",
+        worker_role="scanner",
+    )
+    assert settings.active_spot_symbols == ["ETH/USDT"]
+
+
+def test_active_spot_symbols_returns_auto_sentinel():
+    settings = WorkerSettings(
+        redis_url="redis://127.0.0.1:6379/0",
+        spot_symbols="auto",
+        worker_role="scanner",
+    )
+    assert settings.active_spot_symbols == ["__auto__"]

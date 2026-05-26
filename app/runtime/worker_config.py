@@ -19,6 +19,7 @@ class WorkerSettings(BaseSettings):
     env_mode: str = "testnet"
     spot_symbol: str = "BTC/USDT"
     spot_symbols: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    spot_symbols_auto_quote: Annotated[list[str], NoDecode] = Field(default_factory=list)
     spot_exchanges: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["okx", "binance", "bybit", "bitget", "gate"]
     )
@@ -53,7 +54,7 @@ class WorkerSettings(BaseSettings):
     control_admin_port: int = 8788
     control_admin_token: str = ""
 
-    @field_validator("spot_symbols", "spot_exchanges", "dispatch_user_ids", mode="before")
+    @field_validator("spot_symbols", "spot_exchanges", "dispatch_user_ids", "spot_symbols_auto_quote", mode="before")
     @classmethod
     def split_csv(cls, value: str | list[str]) -> str | list[str]:
         if isinstance(value, str):
@@ -82,6 +83,8 @@ class WorkerSettings(BaseSettings):
 
     @property
     def active_spot_symbols(self) -> list[str]:
+        if self.spot_symbols and self.spot_symbols[0] == "auto":
+            return ["__auto__"]
         return self.spot_symbols or [self.spot_symbol]
 
     @property

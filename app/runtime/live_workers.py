@@ -1285,8 +1285,61 @@ class ContinuousSpotScanner:
         orderbook_depth_limit: int = 5,
         target_quote_amount: float = 100.0,
         max_iterations: int | None = None,
+        batch_concurrency: int = 15,
+        batch_threshold: int = 10,
     ) -> None:
         active_symbols = symbols or ([symbol] if symbol is not None else [])
+        if len(active_symbols) >= batch_threshold:
+            iteration = 0
+            while max_iterations is None or iteration < max_iterations:
+                results = await self.flow_service.run_batch(
+                    exchanges=exchanges,
+                    credentials_by_exchange=credentials_by_exchange,
+                    symbols=active_symbols,
+                    env_mode=env_mode,
+                    proxies_by_exchange=proxies_by_exchange,
+                    orderbook_depth_limit=orderbook_depth_limit,
+                    target_quote_amount=target_quote_amount,
+                    concurrency=batch_concurrency,
+                )
+                for result in results:
+                    if self.event_router is not None:
+                        await self.event_router.dispatch(
+                            RuntimeEvent(
+                                event_type="opportunity.detected",
+                                level="INFO",
+                                service="scanner",
+                                region=self.region,
+                                symbol=result.symbol,
+                                message="opportunity detected",
+                                payload={
+                                    "buy_exchange": result.buy_exchange,
+                                    "sell_exchange": result.sell_exchange,
+                                    "spread_bps": result.spread_bps,
+                                },
+                            )
+                        )
+                if self.event_router is not None:
+                    await self.event_router.dispatch(
+                        RuntimeEvent(
+                            event_type="scanner.iteration.succeeded",
+                            level="INFO",
+                            service="scanner",
+                            region=self.region,
+                            symbol=None,
+                            message="scanner iteration succeeded",
+                            payload={
+                                "exchanges": exchanges,
+                                "symbols_count": len(active_symbols),
+                                "opportunities_count": len(results),
+                            },
+                        )
+                    )
+                iteration += 1
+                if max_iterations is None or iteration < max_iterations:
+                    await asyncio.sleep(self.poll_interval_seconds)
+            return
+
         iteration = 0
         while max_iterations is None or iteration < max_iterations:
             for active_symbol in active_symbols:
