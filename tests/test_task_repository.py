@@ -437,6 +437,177 @@ def test_claim_next_executable_task_can_claim_due_retry_pending_task():
     assert claimed.status == "RUNNING"
 
 
+def test_mark_auto_recovery_retry_increments_retry_count_and_requeues_task():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = Session(engine)
+    session.add(User(id=42, username="u42"))
+    session.commit()
+
+    repository = TaskRepository(session)
+    repository.create_task(
+        ArbitrageTaskCreate(
+            task_uuid="arb-retry-1",
+            user_id=42,
+            strategy_config_id=11,
+            opportunity_id="1-0",
+            env_mode="testnet",
+            task_type="open",
+            symbol="BTC/USDT",
+            spot_exchange="binance",
+            derivative_exchange="okx",
+            target_notional=100.0,
+            expected_spread_bps=25.0,
+            expected_funding_bps=5.0,
+            idempotency_key="42:1-0:open:11",
+            home_region="main",
+        )
+    )
+    repository.mark_executing("arb-retry-1", worker_node_id="node-a")
+
+    task = repository.mark_auto_recovery_retry(
+        "arb-retry-1",
+        failure_reason="temporary_route_failure",
+    )
+
+    assert task.status == "DISPATCHED"
+    assert task.status_reason is None
+    assert task.retry_count == 1
+    assert task.auto_recovery_status == "RETRY_PENDING"
+    assert task.failure_reason == "temporary_route_failure"
+    assert task.cooldown_until is None
+    assert task.finished_at is None
+
+
+def test_mark_auto_recovery_cooldown_sets_due_time_without_finishing_task():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = Session(engine)
+    session.add(User(id=42, username="u42"))
+    session.commit()
+
+    repository = TaskRepository(session)
+    repository.create_task(
+        ArbitrageTaskCreate(
+            task_uuid="arb-cooldown-1",
+            user_id=42,
+            strategy_config_id=11,
+            opportunity_id="1-0",
+            env_mode="testnet",
+            task_type="open",
+            symbol="BTC/USDT",
+            spot_exchange="binance",
+            derivative_exchange="okx",
+            target_notional=100.0,
+            expected_spread_bps=25.0,
+            expected_funding_bps=5.0,
+            idempotency_key="42:1-0:open:11",
+            home_region="main",
+        )
+    )
+    repository.mark_executing("arb-cooldown-1", worker_node_id="node-a")
+    due_at = datetime.utcnow() + timedelta(minutes=3)
+
+    task = repository.mark_auto_recovery_cooldown(
+        "arb-cooldown-1",
+        failure_reason="retry_limit_reached",
+        cooldown_until=due_at,
+    )
+
+    assert task.status == "DISPATCHED"
+    assert task.status_reason is None
+    assert task.auto_recovery_status == "COOLDOWN"
+    assert task.failure_reason == "retry_limit_reached"
+    assert task.cooldown_until is not None
+    assert task.finished_at is None
+
+
+def test_mark_auto_recovery_exhausted_marks_final_failure():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = Session(engine)
+    session.add(User(id=42, username="u42"))
+    session.commit()
+
+    repository = TaskRepository(session)
+    repository.create_task(
+        ArbitrageTaskCreate(
+            task_uuid="arb-exhausted-1",
+            user_id=42,
+            strategy_config_id=11,
+            opportunity_id="1-0",
+            env_mode="testnet",
+            task_type="open",
+            symbol="BTC/USDT",
+            spot_exchange="binance",
+            derivative_exchange="okx",
+            target_notional=100.0,
+            expected_spread_bps=25.0,
+            expected_funding_bps=5.0,
+            idempotency_key="42:1-0:open:11",
+            home_region="main",
+        )
+    )
+    repository.mark_executing("arb-exhausted-1", worker_node_id="node-a")
+
+    task = repository.mark_auto_recovery_exhausted(
+        "arb-exhausted-1",
+        failure_reason="cooldown_retried_and_failed",
+    )
+
+    assert task.status == "FAILED"
+    assert task.status_reason == "auto_recovery_exhausted"
+    assert task.auto_recovery_status == "EXHAUSTED"
+    assert task.failure_reason == "cooldown_retried_and_failed"
+    assert task.cooldown_until is None
+    assert task.finished_at is not None
+
+
+def test_mark_failed_clears_cooldown_and_marks_exhausted():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = Session(engine)
+    session.add(User(id=42, username="u42"))
+    session.commit()
+
+    repository = TaskRepository(session)
+    repository.create_task(
+        ArbitrageTaskCreate(
+            task_uuid="arb-hard-failed-1",
+            user_id=42,
+            strategy_config_id=11,
+            opportunity_id="1-0",
+            env_mode="testnet",
+            task_type="open",
+            symbol="BTC/USDT",
+            spot_exchange="binance",
+            derivative_exchange="okx",
+            target_notional=100.0,
+            expected_spread_bps=25.0,
+            expected_funding_bps=5.0,
+            idempotency_key="42:1-0:open:11",
+            home_region="main",
+        )
+    )
+    repository.mark_auto_recovery_cooldown(
+        "arb-hard-failed-1",
+        failure_reason="temporary_route_failure",
+        cooldown_until=datetime.utcnow() + timedelta(minutes=5),
+    )
+
+    task = repository.mark_failed(
+        "arb-hard-failed-1",
+        reason="unexpected_executor_exception",
+    )
+
+    assert task.status == "FAILED"
+    assert task.status_reason == "unexpected_executor_exception"
+    assert task.failure_reason == "unexpected_executor_exception"
+    assert task.auto_recovery_status == "EXHAUSTED"
+    assert task.cooldown_until is None
+    assert task.finished_at is not None
+
+
 def test_task_repository_marks_execution_result_with_summary_fields():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)

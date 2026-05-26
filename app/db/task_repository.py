@@ -161,6 +161,9 @@ class TaskRepository:
         task = self._require_task(task_uuid)
         task.status = "FAILED"
         task.status_reason = reason
+        task.failure_reason = reason
+        task.auto_recovery_status = "EXHAUSTED"
+        task.cooldown_until = None
         task.finished_at = datetime.utcnow()
         self.session.commit()
         self.session.refresh(task)
