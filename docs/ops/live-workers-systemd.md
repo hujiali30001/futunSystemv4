@@ -639,6 +639,73 @@ summary。
 - 主服务器代码与虚拟环境下，最小 repair worker 双消费者闭环已通过
 - 本次验证只覆盖 helper canary，不代表 systemd repair 链已完整演练
 
+### Repair Worker Systemd Dual-Service Validation
+
+`repair worker` 的这轮远端验收走主服务器真实 systemd 双服务联调：
+
+- `furun-spot-executor.service`
+- `furun-spot-repair.service`
+
+本次没有触发真实交易所下单，而是临时上传 `sitecustomize.py` 到远端项目根目录，并在
+`.env.worker` 中短时打开：
+
+- `FURUN_CANARY_MODE=repair_systemd_dual_service`
+- `FURUN_CANARY_REPAIR_RESULT=success`
+
+同时在 canary 模式下临时 monkeypatch：
+
+- `RuntimeTradeExecutionService.run_task()`
+- `RuntimeRepairExecutionService.run_task()`
+- `ExecutorAccountTruthResolver.resolve_accounts()`
+
+这样 `executor` 会稳定返回 `OPEN_PARTIAL`，`repair` 会稳定返回 `REPAIRED`，并绕过这轮
+canary 不关心的账户真值阻塞，只验证真实 systemd 服务之间的 `executor -> repair`
+联动；验证完成后会恢复 `.env.worker` 并删除远端 `sitecustomize.py`。
+
+本次 helper 路径：
+
+- `.tmp-ssh/repair_systemd_dual_service_sitecustomize.py`
+- `.tmp-ssh/sync_and_validate_repair_systemd_dual_service.py`
+- `.tmp-ssh/repair_systemd_dual_service_output.json`
+
+主服务器实测记录（2026-05-26）：
+
+- 远端 `executor` 与 `repair` unit 初始都未正确安装到 systemd，验证脚本已最小补装
+- 远端运行代码初始也落后于本地，验证脚本已最小同步：
+  - `app/runtime/worker_service.py`
+  - `app/runtime/worker_config.py`
+  - `app/runtime/live_workers.py`
+  - `app/runtime/redis_flow.py`
+  - `app/runtime/trade_execution_service.py`
+  - `app/runtime/repair_execution_service.py`
+  - `app/runtime/runtime_events.py`
+  - `app/db/task_repository.py`
+- `furun-spot-executor.service` 返回 `active`
+- `furun-spot-repair.service` 返回 `active`
+- 注入 canary `repair-systemd-canary-1`
+- `executor` 侧出现 `executor.repair_planned`
+- `repair` 侧出现 `repair.task.finished`
+- `stream:repair_tasks:main` 最新 entries 中可见该 canary 的 repair payload
+- 任务最终收口为：
+  - `status = SUCCEEDED`
+  - `execution_status = OPEN_HEDGED`
+  - `repair_action = AUTO_HEDGE_REPAIRING`
+  - `repair_reason = repair_succeeded`
+
+本次验证结论：
+
+- 主服务器真实 systemd 形态下，最小 `executor -> repair` 双服务联动已通过
+- 这轮验证依赖临时 canary monkeypatch，不代表真实交易所路径已完成生产联调
+- 清理步骤必须保留：恢复 `.env.worker`、删除远端 `sitecustomize.py`、重启两个服务
+
+本次远端排障备注：
+
+- 第一轮阻塞不是代码逻辑，而是远端 `furun-spot-executor.service`、`furun-spot-repair.service` 没有真正安装到 systemd
+- 第二轮阻塞是远端 `worker_service.py` 仍为旧版本，`--role repair` 不被接受
+- 第三轮阻塞是 `executor` 需要任务真值和账户真值，直接写 stream 会先命中 `task not found` 与 `executor_account_not_found`
+- 为了把范围收敛在“真实 systemd 双服务联动”本身，这轮采用临时 monkeypatch 绕过非目标阻塞
+- 验证脚本最终已完成 cleanup 复核：远端 `sitecustomize.py` 被删除，`.env.worker` 中 `FURUN_CANARY_*` 键已清除
+
 ### Executor Execution Result Event Validation
 
 `executor.execution_result` 远端闭环采用主服务器 helper 模式验证，不依赖
