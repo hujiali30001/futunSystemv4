@@ -115,3 +115,61 @@ async def test_session_close_is_safe_when_client_missing_or_not_closable():
 
     assert session_without_client.closed is True
     assert session_without_close.closed is True
+
+
+def test_exchange_factory_creates_bybit_session():
+    class FakeExchangeClient:
+        def __init__(self, config):
+            self.config = config
+            self.sandbox_enabled = False
+
+        def set_sandbox_mode(self, enabled):
+            self.sandbox_enabled = enabled
+
+    class FakeCcxtModule:
+        bybit = FakeExchangeClient
+
+    factory = ExchangeClientFactory(ccxt_module=FakeCcxtModule())
+    session = factory.create_session(
+        exchange="bybit",
+        env_mode="testnet",
+        proxies={},
+        credentials=ExchangeCredentials(
+            api_key="bybit-key",
+            secret="bybit-secret",
+        ),
+    )
+
+    assert session.exchange == "bybit"
+    assert session.env_mode == "testnet"
+    assert session.client.config["apiKey"] == "bybit-key"
+    assert session.client.sandbox_enabled is True
+
+
+def test_exchange_factory_creates_all_five_sessions():
+    class FakeExchangeClient:
+        def __init__(self, config):
+            self.config = config
+            self.sandbox_enabled = False
+
+        def set_sandbox_mode(self, enabled):
+            self.sandbox_enabled = enabled
+
+    class FakeCcxtModule:
+        okx = FakeExchangeClient
+        binance = FakeExchangeClient
+        bybit = FakeExchangeClient
+        bitget = FakeExchangeClient
+        gate = FakeExchangeClient
+
+    factory = ExchangeClientFactory(ccxt_module=FakeCcxtModule())
+
+    for exchange in ["okx", "binance", "bybit", "bitget", "gate"]:
+        session = factory.create_session(
+            exchange=exchange,
+            env_mode="testnet",
+            proxies={},
+            credentials=ExchangeCredentials(api_key="k", secret="s"),
+        )
+        assert session.exchange == exchange
+        assert session.client.sandbox_enabled is True
