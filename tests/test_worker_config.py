@@ -64,6 +64,12 @@ def test_worker_settings_support_dispatcher_and_executor_roles():
     assert settings.resolved_executor_stream_key == "stream:spot_exec_tasks:main"
 
 
+def test_worker_settings_accept_arb_dispatcher_role():
+    settings = WorkerSettings(worker_role="arb_dispatcher")
+
+    assert settings.worker_role == "arb_dispatcher"
+
+
 def test_worker_settings_parse_user_node_routes_csv():
     settings = WorkerSettings(
         user_node_routes="42:node-a, 99 : node-b",

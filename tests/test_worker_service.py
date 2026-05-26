@@ -49,6 +49,7 @@ class FakeFactory:
         self.scanner_worker = FakeWorker()
         self.consumer_worker = FakeWorker()
         self.dispatcher_worker = FakeWorker()
+        self.arb_dispatcher_worker = FakeWorker()
         self.executor_worker = FakeWorker()
         self.repair_worker = FakeWorker()
 
@@ -62,6 +63,9 @@ class FakeFactory:
 
     def build_dispatcher_worker(self, **kwargs):
         return self.dispatcher_worker
+
+    def build_arbitrage_dispatcher_worker(self, **kwargs):
+        return self.arb_dispatcher_worker
 
     def build_executor_worker(self, **kwargs):
         return self.executor_worker
@@ -219,6 +223,26 @@ async def test_worker_app_dispatches_dispatcher_role(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_worker_app_dispatches_arb_dispatcher_role(monkeypatch):
+    seed_credentials(monkeypatch)
+    redis_client = FakeRedis()
+    factory = FakeFactory()
+    app = WorkerApp(
+        settings=WorkerSettings(
+            worker_role="arb_dispatcher",
+            spot_exchanges=["okx", "bitget"],
+        ),
+        alert_settings=AlertSettings(alerts_enabled=True),
+        redis_factory=lambda _: redis_client,
+        worker_factory=factory,
+    )
+
+    await app.run()
+
+    assert len(factory.arb_dispatcher_worker.calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_default_worker_factory_builds_dispatcher_with_control_guard():
     factory = DefaultWorkerFactory(
         settings=WorkerSettings(
@@ -234,6 +258,39 @@ async def test_default_worker_factory_builds_dispatcher_with_control_guard():
     assert worker.control_guard is not None
     assert worker.control_guard.service_name == "dispatcher"
     assert worker.control_guard.region == "main"
+
+
+@pytest.mark.asyncio
+async def test_default_worker_factory_builds_arb_dispatcher_with_opportunity_stream():
+    factory = DefaultWorkerFactory(
+        settings=WorkerSettings(
+            worker_role="arb_dispatcher",
+            worker_region="main",
+            dispatch_source_stream="stream:opportunities",
+            spot_exchanges=["okx", "bitget"],
+        ),
+        event_router=FakeEventRouter(),
+    )
+
+    worker = factory.build_arbitrage_dispatcher_worker(redis_client=FakeRedis())
+
+    assert worker.stream_key == "stream:opportunities"
+
+
+@pytest.mark.asyncio
+async def test_default_worker_factory_builds_arb_dispatcher_with_opportunity_stream_by_default():
+    factory = DefaultWorkerFactory(
+        settings=WorkerSettings(
+            worker_role="arb_dispatcher",
+            worker_region="main",
+            spot_exchanges=["okx", "bitget"],
+        ),
+        event_router=FakeEventRouter(),
+    )
+
+    worker = factory.build_arbitrage_dispatcher_worker(redis_client=FakeRedis())
+
+    assert worker.stream_key == "stream:opportunities"
 
 
 @pytest.mark.asyncio

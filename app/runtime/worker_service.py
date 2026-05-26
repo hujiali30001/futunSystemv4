@@ -24,6 +24,7 @@ from app.runtime.live_workers import (
     ControlGuard,
     ControlPlaneLoader,
     ContinuousSpotScanner,
+    RedisArbitrageTaskDispatcher,
     RedisExecutionTaskConsumer,
     RedisRepairTaskConsumer,
     RedisNodeTaskDispatcher,
@@ -156,6 +157,34 @@ class DefaultWorkerFactory:
             task_repository=task_repository,
             block_ms=self.settings.consumer_block_ms,
             event_router=self.event_router,
+            region=self.settings.worker_region,
+            env_mode=self.settings.env_mode,
+        )
+
+    def build_arbitrage_dispatcher_worker(
+        self, *, redis_client: Redis
+    ) -> RedisArbitrageTaskDispatcher:
+        task_repository = None
+        strategy_repository = None
+        dispatch_user_repository = None
+        account_repository = None
+        if self.settings.database_enabled:
+            session_factory = build_session_factory(self.settings.database_url)
+            session = session_factory()
+            task_repository = TaskRepository(session)
+            strategy_repository = StrategyConfigRepository(session)
+            dispatch_user_repository = DispatchUserRepository(session)
+            account_repository = AccountRepository(session)
+        return RedisArbitrageTaskDispatcher(
+            redis_client=redis_client,
+            user_ids=self.settings.dispatch_user_ids,
+            dispatch_user_repository=dispatch_user_repository,
+            account_repository=account_repository,
+            route_resolver=UserNodeRouter(redis_client),
+            task_repository=task_repository,
+            strategy_repository=strategy_repository,
+            stream_key=self.settings.resolved_dispatch_source_stream,
+            block_ms=self.settings.consumer_block_ms,
             region=self.settings.worker_region,
             env_mode=self.settings.env_mode,
         )
@@ -321,6 +350,13 @@ class WorkerApp:
                 await worker.run(max_iterations=None)
                 return
 
+            if self.settings.worker_role == "arb_dispatcher":
+                worker = factory.build_arbitrage_dispatcher_worker(
+                    redis_client=redis_client
+                )
+                await worker.run(max_iterations=None)
+                return
+
             if self.settings.worker_role == "executor":
                 worker = factory.build_executor_worker(redis_client=redis_client)
                 await worker.run(
@@ -360,7 +396,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--role",
-        choices=["scanner", "consumer", "dispatcher", "executor", "repair"],
+        choices=[
+            "scanner",
+            "consumer",
+            "dispatcher",
+            "arb_dispatcher",
+            "executor",
+            "repair",
+        ],
         default=None,
     )
     return parser.parse_args(argv)

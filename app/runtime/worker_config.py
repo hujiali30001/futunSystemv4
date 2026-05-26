@@ -27,7 +27,12 @@ class WorkerSettings(BaseSettings):
     scanner_poll_interval_seconds: float = 1.0
     consumer_block_ms: int = 1000
     worker_role: Literal[
-        "scanner", "consumer", "dispatcher", "executor", "repair"
+        "scanner",
+        "consumer",
+        "dispatcher",
+        "arb_dispatcher",
+        "executor",
+        "repair",
     ] = "scanner"
     worker_region: str = "default"
     database_enabled: bool = False
@@ -85,6 +90,15 @@ class WorkerSettings(BaseSettings):
     @property
     def resolved_repair_stream_key(self) -> str:
         return self.repair_stream_key or f"stream:repair_tasks:{self.node_id}"
+
+    @property
+    def resolved_dispatch_source_stream(self) -> str:
+        if (
+            self.worker_role == "arb_dispatcher"
+            and self.dispatch_source_stream == "stream:spot_opps"
+        ):
+            return "stream:opportunities"
+        return self.dispatch_source_stream
 
 
 class AlertSettings(BaseSettings):
