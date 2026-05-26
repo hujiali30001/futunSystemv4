@@ -668,19 +668,13 @@ class ArbitrageExecutionTaskConsumer:
         credentials_by_exchange: dict[str, Any],
         proxies_by_exchange: dict[str, dict[str, str]] | None = None,
     ) -> int:
-        tasks = self.task_repository.list_executable_tasks(
+        task = self.task_repository.claim_next_executable_task(
+            worker_node_id=self.worker_node_id,
             env_mode=self.env_mode,
-            limit=1,
         )
-        if not tasks:
+        if task is None:
             return 0
-
-        task = tasks[0]
         try:
-            self.task_repository.mark_executing(
-                str(task.task_uuid),
-                worker_node_id=self.worker_node_id,
-            )
             execution_accounts = self._build_execution_accounts(task)
             result = await self.execution_adapter.execute_task(
                 task=task,

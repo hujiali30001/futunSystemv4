@@ -134,6 +134,7 @@ class FakeTaskRepository:
         self.tasks_by_uuid = {}
         self.executable_tasks = []
         self.list_executable_calls = []
+        self.claim_next_calls = []
         self.created = []
         self.dispatched = []
         self.executing = []
@@ -151,6 +152,14 @@ class FakeTaskRepository:
     def list_executable_tasks(self, *, env_mode: str, limit: int = 100):
         self.list_executable_calls.append({"env_mode": env_mode, "limit": limit})
         return list(self.executable_tasks[:limit])
+
+    def claim_next_executable_task(self, *, worker_node_id: str, env_mode: str):
+        self.claim_next_calls.append(
+            {"worker_node_id": worker_node_id, "env_mode": env_mode}
+        )
+        if not self.executable_tasks:
+            return None
+        return self.executable_tasks.pop(0)
 
     def mark_dispatched(self, task_uuid: str, *, worker_node_id: str):
         self.dispatched.append((task_uuid, worker_node_id))
@@ -5204,8 +5213,11 @@ async def test_arbitrage_execution_consumer_marks_open_task_succeeded_after_adap
     )
 
     assert processed == 1
-    assert repository.list_executable_calls == [{"env_mode": "testnet", "limit": 1}]
-    assert repository.executing == [("arb-open-1", "node-a")]
+    assert repository.claim_next_calls == [
+        {"worker_node_id": "node-a", "env_mode": "testnet"}
+    ]
+    assert repository.list_executable_calls == []
+    assert repository.executing == []
     assert account_repository.calls == [{"user_id": 42, "env_mode": "testnet"}]
     assert execution_adapter.calls[0]["task"] is task
     assert execution_adapter.calls[0]["execution_accounts_by_exchange"] == {
@@ -5226,6 +5238,36 @@ async def test_arbitrage_execution_consumer_marks_open_task_succeeded_after_adap
         )
     ]
     assert repository.repair_results == []
+
+
+@pytest.mark.asyncio
+async def test_arbitrage_execution_consumer_returns_zero_when_no_claimable_task():
+    repository = FakeTaskRepository(task_uuid="arb-open-empty")
+    execution_adapter = ArbitrageExecutionAdapterStub(result=object())
+    consumer = ArbitrageExecutionTaskConsumer(
+        task_repository=repository,
+        execution_adapter=execution_adapter,
+        repair_service=FakeRepairExecutionService(result=None),
+        account_repository=FakeAccountRepository({}),
+        worker_node_id="node-a",
+        env_mode="testnet",
+    )
+
+    processed = await consumer.run_once(
+        credentials_by_exchange={"binance": object()},
+        proxies_by_exchange=None,
+    )
+
+    assert processed == 0
+    assert repository.claim_next_calls == [
+        {"worker_node_id": "node-a", "env_mode": "testnet"}
+    ]
+    assert repository.list_executable_calls == []
+    assert repository.executing == []
+    assert execution_adapter.calls == []
+    assert repository.execution_results == []
+    assert repository.repair_results == []
+    assert repository.failed == []
 
 
 @pytest.mark.asyncio
