@@ -25,6 +25,7 @@ class SymbolDiscovery:
         credentials_by_exchange: dict,
         env_mode: str = "testnet",
         proxies_by_exchange: dict[str, dict[str, str]] | None = None,
+        min_exchange_count: int = 3,
     ) -> list[str]:
         symbol_sets: list[set[str]] = []
         for exchange in exchanges:
@@ -41,8 +42,13 @@ class SymbolDiscovery:
             finally:
                 await session.close()
 
-        common = set.intersection(*symbol_sets) if symbol_sets else set()
-        return sorted(common)
+        counter: dict[str, int] = {}
+        for pairs in symbol_sets:
+            for symbol in pairs:
+                counter[symbol] = counter.get(symbol, 0) + 1
+
+        threshold = max(min(min_exchange_count, len(exchanges)), 1)
+        return sorted(s for s, count in counter.items() if count >= threshold)
 
     def _extract_spot_usdt_pairs(self, markets: dict) -> set[str]:
         pairs: set[str] = set()
