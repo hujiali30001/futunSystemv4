@@ -97,20 +97,23 @@ async def test_runtime_trade_execution_service_returns_open_hedged_for_two_succe
     service = RuntimeTradeExecutionService(
         session_factory=FakeSessionFactory(
             {
-                "okx": {"bid": 100.0, "ask": 101.0},
-                "gate": {"bid": 103.0, "ask": 104.0},
+                "okx": {"bid": 100.0, "ask": 98.0},
+                "binance": {"bid": 98.0, "ask": 99.0},
+                "bybit": {"bid": 103.0, "ask": 104.0},
+                "bitget": {"bid": 99.0, "ask": 100.0},
+                "gate": {"bid": 105.0, "ask": 106.0},
             }
         )
     )
 
     result = await service.run_task(
-        exchanges=["okx", "gate"],
-        credentials_by_exchange={"okx": object(), "gate": object()},
-        execution_accounts_by_exchange={"okx": object(), "gate": object()},
+        exchanges=["okx", "binance", "bybit", "bitget", "gate"],
+        credentials_by_exchange={"okx": object(), "binance": object(), "bybit": object(), "bitget": object(), "gate": object()},
+        execution_accounts_by_exchange={"okx": object(), "binance": object(), "bybit": object(), "bitget": object(), "gate": object()},
         symbol="BTC/USDT",
         target_quote_amount=40.0,
         env_mode="testnet",
-        proxies_by_exchange={"okx": {}, "gate": {}},
+        proxies_by_exchange={"okx": {}, "binance": {}, "bybit": {}, "bitget": {}, "gate": {}},
     )
 
     assert result.ok is True
@@ -140,20 +143,23 @@ async def test_runtime_trade_execution_service_returns_open_partial_when_one_leg
     service = RuntimeTradeExecutionService(
         session_factory=FakeSessionFactory(
             {
-                "okx": {"bid": 100.0, "ask": 101.0},
-                "gate": {"bid": 103.0, "ask": 104.0, "fail_create": True},
+                "okx": {"bid": 100.0, "ask": 98.0},
+                "binance": {"bid": 98.0, "ask": 99.0},
+                "bybit": {"bid": 103.0, "ask": 104.0},
+                "bitget": {"bid": 99.0, "ask": 100.0},
+                "gate": {"bid": 105.0, "ask": 106.0, "fail_create": True},
             }
         )
     )
 
     result = await service.run_task(
-        exchanges=["okx", "gate"],
-        credentials_by_exchange={"okx": object(), "gate": object()},
-        execution_accounts_by_exchange={"okx": object(), "gate": object()},
+        exchanges=["okx", "binance", "bybit", "bitget", "gate"],
+        credentials_by_exchange={"okx": object(), "binance": object(), "bybit": object(), "bitget": object(), "gate": object()},
+        execution_accounts_by_exchange={"okx": object(), "binance": object(), "bybit": object(), "bitget": object(), "gate": object()},
         symbol="BTC/USDT",
         target_quote_amount=40.0,
         env_mode="testnet",
-        proxies_by_exchange={"okx": {}, "gate": {}},
+        proxies_by_exchange={"okx": {}, "binance": {}, "bybit": {}, "bitget": {}, "gate": {}},
     )
 
     assert result.ok is False

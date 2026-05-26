@@ -1,4 +1,4 @@
-import pytest
+﻿import pytest
 from datetime import datetime, timedelta
 
 from app.admin.control_plane import ControlDecision
@@ -1145,8 +1145,8 @@ async def test_continuous_scanner_scans_each_symbol_for_every_iteration():
     scanner = ContinuousSpotScanner(flow_service=service, poll_interval_seconds=0.0)
 
     await scanner.run(
-        exchanges=["okx", "bitget", "gate"],
-        credentials_by_exchange={"okx": object(), "bitget": object(), "gate": object()},
+        exchanges=["okx", "binance", "bybit", "bitget", "gate"],
+        credentials_by_exchange={"okx": object(), "binance": object(), "bybit": object(), "bitget": object(), "gate": object()},
         symbols=["BTC/USDT", "ETH/USDT"],
         max_iterations=2,
     )
@@ -1170,8 +1170,8 @@ async def test_continuous_scanner_emits_event_from_spot_opportunity_attributes()
     )
 
     await scanner.run(
-        exchanges=["okx", "bitget", "gate"],
-        credentials_by_exchange={"okx": object(), "bitget": object(), "gate": object()},
+        exchanges=["okx", "binance", "bybit", "bitget", "gate"],
+        credentials_by_exchange={"okx": object(), "binance": object(), "bybit": object(), "bitget": object(), "gate": object()},
         symbols=["BTC/USDT"],
         max_iterations=1,
     )
@@ -1194,8 +1194,8 @@ async def test_continuous_scanner_emits_detected_event_for_each_active_symbol():
     )
 
     await scanner.run(
-        exchanges=["okx", "bitget", "gate"],
-        credentials_by_exchange={"okx": object(), "bitget": object(), "gate": object()},
+        exchanges=["okx", "binance", "bybit", "bitget", "gate"],
+        credentials_by_exchange={"okx": object(), "binance": object(), "bybit": object(), "bitget": object(), "gate": object()},
         symbols=["BTC/USDT", "ETH/USDT"],
         max_iterations=1,
     )
@@ -1215,8 +1215,8 @@ async def test_continuous_scanner_forwards_depth_limit_and_quote_amount():
     scanner = ContinuousSpotScanner(flow_service=service, poll_interval_seconds=0.0)
 
     await scanner.run(
-        exchanges=["okx", "bitget", "gate"],
-        credentials_by_exchange={"okx": object(), "bitget": object(), "gate": object()},
+        exchanges=["okx", "binance", "bybit", "bitget", "gate"],
+        credentials_by_exchange={"okx": object(), "binance": object(), "bybit": object(), "bitget": object(), "gate": object()},
         symbols=["BTC/USDT"],
         orderbook_depth_limit=9,
         target_quote_amount=250.0,
@@ -1238,7 +1238,7 @@ async def test_redis_consumer_reads_stream_and_dispatches_payload():
     )
 
     processed = await consumer.run(
-        credentials_by_exchange={"bitget": object(), "gate": object()},
+        credentials_by_exchange={"okx": object(), "binance": object(), "bybit": object(), "bitget": object(), "gate": object()},
         max_iterations=2,
     )
 
@@ -1246,7 +1246,7 @@ async def test_redis_consumer_reads_stream_and_dispatches_payload():
     assert processed == 1
     assert payload["buy_exchange"] == "bitget"
     assert payload["sell_exchange"] == "gate"
-    assert set(credentials.keys()) == {"bitget", "gate"}
+    assert set(credentials.keys()) == {"okx", "binance", "bybit", "bitget", "gate"}
 
 
 @pytest.mark.asyncio
@@ -1263,7 +1263,7 @@ async def test_redis_consumer_accepts_event_router_without_affecting_dispatch():
     )
 
     processed = await consumer.run(
-        credentials_by_exchange={"bitget": object(), "gate": object()},
+        credentials_by_exchange={"okx": object(), "binance": object(), "bybit": object(), "bitget": object(), "gate": object()},
         max_iterations=1,
     )
 
@@ -3403,7 +3403,7 @@ async def test_executor_worker_reads_only_its_node_stream():
     )
 
     processed = await consumer.run(
-        credentials_by_exchange={"okx": object(), "gate": object()},
+        credentials_by_exchange={"okx": object(), "binance": object(), "bybit": object(), "bitget": object(), "gate": object()},
         max_iterations=1,
     )
 
@@ -3689,7 +3689,7 @@ async def test_executor_marks_task_executing_and_succeeded():
     )
 
     processed = await consumer.run(
-        credentials_by_exchange={"okx": object(), "gate": object()},
+        credentials_by_exchange={"okx": object(), "binance": object(), "bybit": object(), "bitget": object(), "gate": object()},
         max_iterations=1,
     )
 
@@ -3742,7 +3742,7 @@ async def test_executor_marks_execution_result_open_hedged():
     )
 
     processed = await consumer.run(
-        credentials_by_exchange={"okx": object(), "gate": object()},
+        credentials_by_exchange={"okx": object(), "binance": object(), "bybit": object(), "bitget": object(), "gate": object()},
         max_iterations=1,
     )
 
@@ -3813,7 +3813,7 @@ async def test_executor_marks_execution_result_with_runtime_trade_execution_serv
     )
 
     processed = await consumer.run(
-        credentials_by_exchange={"okx": object(), "gate": object()},
+        credentials_by_exchange={"okx": object(), "binance": object(), "bybit": object(), "bitget": object(), "gate": object()},
         max_iterations=1,
     )
 
@@ -3941,7 +3941,7 @@ async def test_executor_runtime_trade_execution_service_uses_payload_exchanges_s
     )
 
     processed = await consumer.run(
-        credentials_by_exchange={"okx": object(), "gate": object()},
+        credentials_by_exchange={"okx": object(), "binance": object(), "bybit": object(), "bitget": object(), "gate": object()},
         max_iterations=1,
     )
 
@@ -3999,7 +3999,7 @@ async def test_executor_marks_execution_result_open_hedged_with_rich_probe_field
     )
 
     processed = await consumer.run(
-        credentials_by_exchange={"okx": object(), "gate": object()},
+        credentials_by_exchange={"okx": object(), "binance": object(), "bybit": object(), "bitget": object(), "gate": object()},
         max_iterations=1,
     )
 
@@ -4063,7 +4063,7 @@ async def test_executor_marks_execution_result_open_partial_with_repair_plan():
     )
 
     processed = await consumer.run(
-        credentials_by_exchange={"okx": object(), "gate": object()},
+        credentials_by_exchange={"okx": object(), "binance": object(), "bybit": object(), "bitget": object(), "gate": object()},
         max_iterations=1,
     )
 
@@ -4132,7 +4132,7 @@ async def test_executor_marks_execution_result_open_partial_with_rich_probe_fiel
     )
 
     processed = await consumer.run(
-        credentials_by_exchange={"okx": object(), "gate": object()},
+        credentials_by_exchange={"okx": object(), "binance": object(), "bybit": object(), "bitget": object(), "gate": object()},
         max_iterations=1,
     )
 
@@ -4206,7 +4206,7 @@ async def test_executor_emits_execution_result_event_for_rich_open_hedged_result
     )
 
     processed = await consumer.run(
-        credentials_by_exchange={"okx": object(), "gate": object()},
+        credentials_by_exchange={"okx": object(), "binance": object(), "bybit": object(), "bitget": object(), "gate": object()},
         max_iterations=1,
     )
 
@@ -4290,7 +4290,7 @@ async def test_executor_emits_execution_result_event_for_rich_open_partial_resul
     )
 
     processed = await consumer.run(
-        credentials_by_exchange={"okx": object(), "gate": object()},
+        credentials_by_exchange={"okx": object(), "binance": object(), "bybit": object(), "bitget": object(), "gate": object()},
         max_iterations=1,
     )
 
@@ -4353,7 +4353,7 @@ async def test_executor_emits_repair_planned_event_for_open_partial_result():
     )
 
     processed = await consumer.run(
-        credentials_by_exchange={"okx": object(), "gate": object()},
+        credentials_by_exchange={"okx": object(), "binance": object(), "bybit": object(), "bitget": object(), "gate": object()},
         max_iterations=1,
     )
 
@@ -4426,7 +4426,7 @@ async def test_executor_does_not_emit_failed_event_for_repairable_open_partial_r
     )
 
     processed = await consumer.run(
-        credentials_by_exchange={"okx": object(), "gate": object()},
+        credentials_by_exchange={"okx": object(), "binance": object(), "bybit": object(), "bitget": object(), "gate": object()},
         max_iterations=1,
     )
 
@@ -4486,7 +4486,7 @@ async def test_executor_still_emits_failed_event_for_non_repair_failure_result()
     )
 
     processed = await consumer.run(
-        credentials_by_exchange={"okx": object(), "gate": object()},
+        credentials_by_exchange={"okx": object(), "binance": object(), "bybit": object(), "bitget": object(), "gate": object()},
         max_iterations=1,
     )
 
@@ -4543,7 +4543,7 @@ async def test_executor_publishes_repair_task_for_open_partial_result():
     )
 
     processed = await consumer.run(
-        credentials_by_exchange={"okx": object(), "gate": object()},
+        credentials_by_exchange={"okx": object(), "binance": object(), "bybit": object(), "bitget": object(), "gate": object()},
         max_iterations=1,
     )
 
@@ -4744,7 +4744,7 @@ async def test_executor_does_not_emit_repair_planned_event_for_open_hedged_resul
     )
 
     processed = await consumer.run(
-        credentials_by_exchange={"okx": object(), "gate": object()},
+        credentials_by_exchange={"okx": object(), "binance": object(), "bybit": object(), "bitget": object(), "gate": object()},
         max_iterations=1,
     )
 
@@ -4800,7 +4800,7 @@ async def test_executor_emits_execution_result_event_for_summary_only_result():
     )
 
     processed = await consumer.run(
-        credentials_by_exchange={"okx": object(), "gate": object()},
+        credentials_by_exchange={"okx": object(), "binance": object(), "bybit": object(), "bitget": object(), "gate": object()},
         max_iterations=1,
     )
 
@@ -4862,7 +4862,7 @@ async def test_executor_emits_execution_result_event_without_task_repository():
     )
 
     processed = await consumer.run(
-        credentials_by_exchange={"okx": object(), "gate": object()},
+        credentials_by_exchange={"okx": object(), "binance": object(), "bybit": object(), "bitget": object(), "gate": object()},
         max_iterations=1,
     )
 
@@ -5039,7 +5039,7 @@ async def test_executor_marks_task_failed_when_dispatch_raises():
     )
 
     processed = await consumer.run(
-        credentials_by_exchange={"okx": object(), "gate": object()},
+        credentials_by_exchange={"okx": object(), "binance": object(), "bybit": object(), "bitget": object(), "gate": object()},
         max_iterations=1,
     )
 
@@ -5084,7 +5084,7 @@ async def test_executor_blocks_even_if_dispatcher_already_published_task():
     )
 
     processed = await consumer.run(
-        credentials_by_exchange={"okx": object(), "gate": object()},
+        credentials_by_exchange={"okx": object(), "binance": object(), "bybit": object(), "bitget": object(), "gate": object()},
         max_iterations=1,
     )
 
@@ -5130,7 +5130,7 @@ async def test_executor_marks_task_blocked_when_control_guard_rejects():
     )
 
     processed = await consumer.run(
-        credentials_by_exchange={"okx": object(), "gate": object()},
+        credentials_by_exchange={"okx": object(), "binance": object(), "bybit": object(), "bitget": object(), "gate": object()},
         max_iterations=1,
     )
 
@@ -5178,7 +5178,7 @@ async def test_executor_emits_control_rule_blocked_event_before_dispatch():
     )
 
     processed = await consumer.run(
-        credentials_by_exchange={"okx": object(), "gate": object()},
+        credentials_by_exchange={"okx": object(), "binance": object(), "bybit": object(), "bitget": object(), "gate": object()},
         max_iterations=1,
     )
 
@@ -5235,7 +5235,7 @@ async def test_executor_emits_control_rule_resized_event():
     )
 
     processed = await consumer.run(
-        credentials_by_exchange={"okx": object(), "gate": object()},
+        credentials_by_exchange={"okx": object(), "binance": object(), "bybit": object(), "bitget": object(), "gate": object()},
         max_iterations=1,
     )
 

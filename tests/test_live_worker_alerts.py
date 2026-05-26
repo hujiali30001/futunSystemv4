@@ -82,8 +82,8 @@ async def test_scanner_emits_opportunity_detected_event_from_dataclass_result():
     )
 
     await scanner.run(
-        exchanges=["okx", "bitget", "gate"],
-        credentials_by_exchange={"okx": object(), "bitget": object(), "gate": object()},
+        exchanges=["okx", "binance", "bybit", "bitget", "gate"],
+        credentials_by_exchange={"okx": object(), "binance": object(), "bybit": object(), "bitget": object(), "gate": object()},
         symbol="BTC/USDT",
         max_iterations=1,
     )

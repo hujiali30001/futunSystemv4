@@ -66,6 +66,8 @@ class FakeFactory:
     def __init__(self):
         self.client_configs = {
             "okx": {"bid": 100.0, "ask": 101.0, "fail_on_create": False},
+            "binance": {"bid": 97.0, "ask": 98.0, "fail_on_create": False},
+            "bybit": {"bid": 104.0, "ask": 105.0, "fail_on_create": False},
             "bitget": {"bid": 99.0, "ask": 100.0, "fail_on_create": False},
             "gate": {"bid": 102.0, "ask": 103.0, "fail_on_create": False},
         }
@@ -237,12 +239,14 @@ async def test_spot_arbitrage_probe_records_leg_statuses_for_full_success():
     service = SpotArbitrageProbeService(session_factory=FakeFactory())
     credentials = {
         "okx": ExchangeCredentials(api_key="a", secret="b", password="c"),
+        "binance": ExchangeCredentials(api_key="a", secret="b"),
+        "bybit": ExchangeCredentials(api_key="a", secret="b", password="c"),
         "bitget": ExchangeCredentials(api_key="a", secret="b", password="c"),
         "gate": ExchangeCredentials(api_key="a", secret="b"),
     }
 
     result = await service.run_task(
-        exchanges=["okx", "bitget", "gate"],
+        exchanges=["okx", "binance", "bybit", "bitget", "gate"],
         credentials_by_exchange=credentials,
         symbol="BTC/USDT",
         env_mode="testnet",
@@ -259,16 +263,18 @@ async def test_spot_arbitrage_probe_records_leg_statuses_for_full_success():
 @pytest.mark.asyncio
 async def test_spot_arbitrage_probe_records_create_sell_failure_details():
     factory = FakeFactory()
-    factory.client_configs["gate"]["fail_on_create"] = True
+    factory.client_configs["bybit"]["fail_on_create"] = True
     service = SpotArbitrageProbeService(session_factory=factory)
     credentials = {
         "okx": ExchangeCredentials(api_key="a", secret="b", password="c"),
+        "binance": ExchangeCredentials(api_key="a", secret="b"),
+        "bybit": ExchangeCredentials(api_key="a", secret="b", password="c"),
         "bitget": ExchangeCredentials(api_key="a", secret="b", password="c"),
         "gate": ExchangeCredentials(api_key="a", secret="b"),
     }
 
     result = await service.run_task(
-        exchanges=["okx", "bitget", "gate"],
+        exchanges=["okx", "binance", "bybit", "bitget", "gate"],
         credentials_by_exchange=credentials,
         symbol="BTC/USDT",
         env_mode="testnet",
@@ -354,22 +360,24 @@ async def test_spot_arbitrage_probe_selects_best_buy_and_sell_and_closes_orders(
     service = SpotArbitrageProbeService(session_factory=FakeFactory())
     credentials = {
         "okx": ExchangeCredentials(api_key="a", secret="b", password="c"),
+        "binance": ExchangeCredentials(api_key="a", secret="b"),
+        "bybit": ExchangeCredentials(api_key="a", secret="b", password="c"),
         "bitget": ExchangeCredentials(api_key="a", secret="b", password="c"),
         "gate": ExchangeCredentials(api_key="a", secret="b"),
     }
 
     result = await service.run_task(
-        exchanges=["okx", "bitget", "gate"],
+        exchanges=["okx", "binance", "bybit", "bitget", "gate"],
         credentials_by_exchange=credentials,
         symbol="BTC/USDT",
         env_mode="testnet",
     )
 
     assert result.ok is True
-    assert result.buy_exchange == "bitget"
-    assert result.sell_exchange == "gate"
-    assert result.buy_order_id == "bitget-buy-1"
-    assert result.sell_order_id == "gate-sell-1"
+    assert result.buy_exchange == "binance"
+    assert result.sell_exchange == "bybit"
+    assert result.buy_order_id == "binance-buy-1"
+    assert result.sell_order_id == "bybit-sell-1"
     assert result.buy_final_status == "canceled"
     assert result.sell_final_status == "canceled"
 
@@ -379,35 +387,39 @@ async def test_spot_arbitrage_probe_returns_open_hedged_summary_when_both_legs_f
     service = SpotArbitrageProbeService(session_factory=FakeFactory())
     credentials = {
         "okx": ExchangeCredentials(api_key="a", secret="b", password="c"),
+        "binance": ExchangeCredentials(api_key="a", secret="b"),
+        "bybit": ExchangeCredentials(api_key="a", secret="b", password="c"),
         "bitget": ExchangeCredentials(api_key="a", secret="b", password="c"),
         "gate": ExchangeCredentials(api_key="a", secret="b"),
     }
 
     result = await service.run_task(
-        exchanges=["okx", "bitget", "gate"],
+        exchanges=["okx", "binance", "bybit", "bitget", "gate"],
         credentials_by_exchange=credentials,
         symbol="BTC/USDT",
         env_mode="testnet",
     )
 
     assert result.execution_status == "OPEN_HEDGED"
-    assert result.filled_exchanges == ["bitget", "gate"]
+    assert result.filled_exchanges == ["binance", "bybit"]
     assert result.failed_exchanges == []
 
 
 @pytest.mark.asyncio
 async def test_spot_arbitrage_probe_returns_open_partial_summary_when_second_leg_create_fails():
     factory = FakeFactory()
-    factory.client_configs["gate"]["fail_on_create"] = True
+    factory.client_configs["bybit"]["fail_on_create"] = True
     service = SpotArbitrageProbeService(session_factory=factory)
     credentials = {
         "okx": ExchangeCredentials(api_key="a", secret="b", password="c"),
+        "binance": ExchangeCredentials(api_key="a", secret="b"),
+        "bybit": ExchangeCredentials(api_key="a", secret="b", password="c"),
         "bitget": ExchangeCredentials(api_key="a", secret="b", password="c"),
         "gate": ExchangeCredentials(api_key="a", secret="b"),
     }
 
     result = await service.run_task(
-        exchanges=["okx", "bitget", "gate"],
+        exchanges=["okx", "binance", "bybit", "bitget", "gate"],
         credentials_by_exchange=credentials,
         symbol="BTC/USDT",
         env_mode="testnet",
@@ -415,8 +427,8 @@ async def test_spot_arbitrage_probe_returns_open_partial_summary_when_second_leg
 
     assert result.ok is False
     assert result.execution_status == "OPEN_PARTIAL"
-    assert result.filled_exchanges == ["bitget"]
-    assert result.failed_exchanges == ["gate"]
+    assert result.filled_exchanges == ["binance"]
+    assert result.failed_exchanges == ["bybit"]
 
 
 @pytest.mark.asyncio
@@ -425,12 +437,14 @@ async def test_spot_arbitrage_probe_closes_all_sessions_after_success():
     service = SpotArbitrageProbeService(session_factory=factory)
     credentials = {
         "okx": ExchangeCredentials(api_key="a", secret="b", password="c"),
+        "binance": ExchangeCredentials(api_key="a", secret="b"),
+        "bybit": ExchangeCredentials(api_key="a", secret="b", password="c"),
         "bitget": ExchangeCredentials(api_key="a", secret="b", password="c"),
         "gate": ExchangeCredentials(api_key="a", secret="b"),
     }
 
     result = await service.run_task(
-        exchanges=["okx", "bitget", "gate"],
+        exchanges=["okx", "binance", "bybit", "bitget", "gate"],
         credentials_by_exchange=credentials,
         symbol="BTC/USDT",
         env_mode="testnet",
@@ -438,9 +452,13 @@ async def test_spot_arbitrage_probe_closes_all_sessions_after_success():
 
     assert result.ok is True
     assert len(factory.created_clients["okx"]) == 1
+    assert len(factory.created_clients["binance"]) == 1
+    assert len(factory.created_clients["bybit"]) == 1
     assert len(factory.created_clients["bitget"]) == 1
     assert len(factory.created_clients["gate"]) == 1
     assert factory.created_clients["okx"][0].closed is True
+    assert factory.created_clients["binance"][0].closed is True
+    assert factory.created_clients["bybit"][0].closed is True
     assert factory.created_clients["bitget"][0].closed is True
     assert factory.created_clients["gate"][0].closed is True
 
@@ -472,16 +490,18 @@ async def test_spot_arbitrage_probe_uses_target_quote_amount_to_reduce_order_siz
 @pytest.mark.asyncio
 async def test_spot_arbitrage_probe_closes_all_sessions_after_order_failure():
     factory = FakeFactory()
-    factory.client_configs["gate"]["fail_on_create"] = True
+    factory.client_configs["bybit"]["fail_on_create"] = True
     service = SpotArbitrageProbeService(session_factory=factory)
     credentials = {
         "okx": ExchangeCredentials(api_key="a", secret="b", password="c"),
+        "binance": ExchangeCredentials(api_key="a", secret="b"),
+        "bybit": ExchangeCredentials(api_key="a", secret="b", password="c"),
         "bitget": ExchangeCredentials(api_key="a", secret="b", password="c"),
         "gate": ExchangeCredentials(api_key="a", secret="b"),
     }
 
     result = await service.run_task(
-        exchanges=["okx", "bitget", "gate"],
+        exchanges=["okx", "binance", "bybit", "bitget", "gate"],
         credentials_by_exchange=credentials,
         symbol="BTC/USDT",
         env_mode="testnet",
@@ -489,9 +509,13 @@ async def test_spot_arbitrage_probe_closes_all_sessions_after_order_failure():
 
     assert result.ok is False
     assert len(factory.created_clients["okx"]) == 1
+    assert len(factory.created_clients["binance"]) == 1
+    assert len(factory.created_clients["bybit"]) == 1
     assert len(factory.created_clients["bitget"]) == 1
     assert len(factory.created_clients["gate"]) == 1
     assert factory.created_clients["okx"][0].closed is True
+    assert factory.created_clients["binance"][0].closed is True
+    assert factory.created_clients["bybit"][0].closed is True
     assert factory.created_clients["bitget"][0].closed is True
     assert factory.created_clients["gate"][0].closed is True
 

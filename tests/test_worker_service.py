@@ -1,4 +1,4 @@
-import pytest
+﻿import pytest
 
 from app.runtime.runtime_events import RuntimeEvent
 from app.runtime.worker_config import AlertSettings, WorkerSettings
@@ -89,6 +89,10 @@ class FakeEventRouter:
 def seed_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OKX_API_KEY", "okx-key")
     monkeypatch.setenv("OKX_SECRET", "okx-secret")
+    monkeypatch.setenv("BINANCE_API_KEY", "binance-key")
+    monkeypatch.setenv("BINANCE_SECRET", "binance-secret")
+    monkeypatch.setenv("BYBIT_API_KEY", "bybit-key")
+    monkeypatch.setenv("BYBIT_SECRET", "bybit-secret")
     monkeypatch.setenv("BITGET_API_KEY", "bitget-key")
     monkeypatch.setenv("BITGET_SECRET", "bitget-secret")
     monkeypatch.setenv("GATE_API_KEY", "gate-key")
@@ -124,7 +128,7 @@ async def test_worker_app_dispatches_scanner_role_and_closes_redis(monkeypatch):
     redis_client = FakeRedis()
     settings = WorkerSettings(
         worker_role="scanner",
-        spot_exchanges=["okx", "bitget"],
+        spot_exchanges=["okx", "binance", "bybit", "bitget", "gate"],
         spot_symbol="BTC/USDT",
     )
     factory = FakeFactory(settings=settings)
@@ -140,7 +144,7 @@ async def test_worker_app_dispatches_scanner_role_and_closes_redis(monkeypatch):
     await app.run()
 
     assert len(factory.scanner_worker.calls) == 1
-    assert factory.scanner_worker.calls[0]["exchanges"] == ["okx", "bitget"]
+    assert factory.scanner_worker.calls[0]["exchanges"] == ["okx", "binance", "bybit", "bitget", "gate"]
     assert factory.scanner_worker.calls[0]["symbols"] == ["BTC/USDT"]
     assert [event.event_type for event in router.events] == [
         "worker.started",
@@ -157,7 +161,7 @@ async def test_worker_app_passes_symbols_depth_and_quote_amount_to_scanner(monke
         worker_role="scanner",
         spot_symbol="BTC/USDT",
         spot_symbols=["BTC/USDT", "ETH/USDT"],
-        spot_exchanges=["okx", "bitget"],
+        spot_exchanges=["okx", "binance", "bybit", "bitget", "gate"],
         orderbook_depth_limit=7,
         target_quote_amount=321.0,
     )
@@ -185,7 +189,7 @@ async def test_worker_app_dispatches_consumer_role_and_closes_redis(monkeypatch)
     app = WorkerApp(
         settings=WorkerSettings(
             worker_role="consumer",
-            spot_exchanges=["okx", "bitget"],
+            spot_exchanges=["okx", "binance", "bybit", "bitget", "gate"],
             spot_symbol="BTC/USDT",
         ),
         alert_settings=AlertSettings(alerts_enabled=True),
@@ -213,7 +217,7 @@ async def test_worker_app_dispatches_dispatcher_role(monkeypatch):
     app = WorkerApp(
         settings=WorkerSettings(
             worker_role="dispatcher",
-            spot_exchanges=["okx", "bitget"],
+            spot_exchanges=["okx", "binance", "bybit", "bitget", "gate"],
             dispatch_user_ids=["42"],
         ),
         alert_settings=AlertSettings(alerts_enabled=True),
@@ -234,7 +238,7 @@ async def test_worker_app_dispatches_arb_dispatcher_role(monkeypatch):
     app = WorkerApp(
         settings=WorkerSettings(
             worker_role="arb_dispatcher",
-            spot_exchanges=["okx", "bitget"],
+            spot_exchanges=["okx", "binance", "bybit", "bitget", "gate"],
         ),
         alert_settings=AlertSettings(alerts_enabled=True),
         redis_factory=lambda _: redis_client,
@@ -252,7 +256,7 @@ async def test_default_worker_factory_builds_dispatcher_with_control_guard():
         settings=WorkerSettings(
             worker_role="dispatcher",
             worker_region="main",
-            spot_exchanges=["okx", "bitget"],
+            spot_exchanges=["okx", "binance", "bybit", "bitget", "gate"],
         ),
         event_router=FakeEventRouter(),
     )
@@ -271,7 +275,7 @@ async def test_default_worker_factory_builds_arb_dispatcher_with_opportunity_str
             worker_role="arb_dispatcher",
             worker_region="main",
             dispatch_source_stream="stream:opportunities",
-            spot_exchanges=["okx", "bitget"],
+            spot_exchanges=["okx", "binance", "bybit", "bitget", "gate"],
         ),
         event_router=FakeEventRouter(),
     )
@@ -287,7 +291,7 @@ async def test_default_worker_factory_builds_arb_dispatcher_with_opportunity_str
         settings=WorkerSettings(
             worker_role="arb_dispatcher",
             worker_region="main",
-            spot_exchanges=["okx", "bitget"],
+            spot_exchanges=["okx", "binance", "bybit", "bitget", "gate"],
         ),
         event_router=FakeEventRouter(),
     )
@@ -303,7 +307,7 @@ async def test_default_worker_factory_builds_dispatcher_with_task_repository_whe
         settings=WorkerSettings(
             worker_role="dispatcher",
             worker_region="main",
-            spot_exchanges=["okx", "bitget"],
+            spot_exchanges=["okx", "binance", "bybit", "bitget", "gate"],
             database_enabled=True,
             database_url="sqlite:///:memory:",
         ),
@@ -321,7 +325,7 @@ async def test_default_worker_factory_builds_dispatcher_with_strategy_repository
         settings=WorkerSettings(
             worker_role="dispatcher",
             worker_region="main",
-            spot_exchanges=["okx", "bitget"],
+            spot_exchanges=["okx", "binance", "bybit", "bitget", "gate"],
             database_enabled=True,
             database_url="sqlite:///:memory:",
         ),
@@ -339,7 +343,7 @@ async def test_default_worker_factory_builds_dispatcher_with_account_repository_
         settings=WorkerSettings(
             worker_role="dispatcher",
             worker_region="main",
-            spot_exchanges=["okx", "bitget"],
+            spot_exchanges=["okx", "binance", "bybit", "bitget", "gate"],
             database_enabled=True,
             database_url="sqlite:///:memory:",
         ),
@@ -357,7 +361,7 @@ async def test_default_worker_factory_builds_dispatcher_with_dispatch_user_repos
         settings=WorkerSettings(
             worker_role="dispatcher",
             worker_region="main",
-            spot_exchanges=["okx", "bitget"],
+            spot_exchanges=["okx", "binance", "bybit", "bitget", "gate"],
             database_enabled=True,
             database_url="sqlite:///:memory:",
         ),
@@ -376,7 +380,7 @@ async def test_default_worker_factory_builds_executor_with_control_guard():
             worker_role="executor",
             worker_region="node-a",
             node_id="node-a",
-            spot_exchanges=["okx", "gate"],
+            spot_exchanges=["okx", "binance", "bybit", "bitget", "gate"],
         ),
         event_router=FakeEventRouter(),
     )
@@ -394,7 +398,7 @@ def test_build_executor_worker_uses_repair_task_publisher_by_default():
             worker_role="executor",
             worker_region="node-a",
             node_id="node-a",
-            spot_exchanges=["okx", "gate"],
+            spot_exchanges=["okx", "binance", "bybit", "bitget", "gate"],
         ),
         event_router=FakeEventRouter(),
     )
@@ -411,7 +415,7 @@ def test_build_executor_worker_uses_trade_execution_service():
             worker_role="executor",
             worker_region="node-a",
             node_id="node-a",
-            spot_exchanges=["okx", "gate"],
+            spot_exchanges=["okx", "binance", "bybit", "bitget", "gate"],
         ),
         event_router=FakeEventRouter(),
     )
@@ -447,7 +451,7 @@ def test_default_worker_factory_builds_arbitrage_executor_worker():
             worker_role="arb_executor",
             worker_region="node-a",
             node_id="node-a",
-            spot_exchanges=["okx", "gate"],
+            spot_exchanges=["okx", "binance", "bybit", "bitget", "gate"],
             database_enabled=True,
             database_url="sqlite:///:memory:",
         ),
@@ -472,7 +476,7 @@ async def test_worker_app_runs_executor_role_with_repair_task_publisher(monkeypa
             worker_role="executor",
             worker_region="node-a",
             node_id="node-a",
-            spot_exchanges=["okx", "gate"],
+            spot_exchanges=["okx", "binance", "bybit", "bitget", "gate"],
         ),
         event_router=FakeEventRouter(),
     )
@@ -490,7 +494,7 @@ async def test_worker_app_runs_executor_role_with_repair_task_publisher(monkeypa
             worker_role="executor",
             worker_region="node-a",
             node_id="node-a",
-            spot_exchanges=["okx", "gate"],
+            spot_exchanges=["okx", "binance", "bybit", "bitget", "gate"],
         ),
         alert_settings=AlertSettings(alerts_enabled=True),
         redis_factory=lambda _: redis_client,
@@ -511,7 +515,7 @@ def test_build_repair_worker_uses_repair_execution_service():
             worker_role="repair",
             worker_region="node-a",
             node_id="node-a",
-            spot_exchanges=["okx", "gate"],
+            spot_exchanges=["okx", "binance", "bybit", "bitget", "gate"],
         ),
         event_router=FakeEventRouter(),
     )
@@ -530,7 +534,7 @@ async def test_worker_app_syncs_user_node_routes_before_dispatcher_run(monkeypat
     app = WorkerApp(
         settings=WorkerSettings(
             worker_role="dispatcher",
-            spot_exchanges=["okx", "bitget"],
+            spot_exchanges=["okx", "binance", "bybit", "bitget", "gate"],
             dispatch_user_ids=["42", "99"],
             user_node_routes={"42": "node-a", "99": "node-b"},
         ),
@@ -559,7 +563,7 @@ async def test_worker_app_syncs_default_routes_without_overwriting_existing_redi
     app = WorkerApp(
         settings=WorkerSettings(
             worker_role="dispatcher",
-            spot_exchanges=["okx", "bitget"],
+            spot_exchanges=["okx", "binance", "bybit", "bitget", "gate"],
             dispatch_user_ids=["42", "99"],
             user_node_routes={"42": "main", "99": "node-b"},
         ),
@@ -583,7 +587,7 @@ async def test_worker_app_dispatches_executor_role(monkeypatch):
         settings=WorkerSettings(
             worker_role="executor",
             node_id="node-a",
-            spot_exchanges=["okx", "gate"],
+            spot_exchanges=["okx", "binance", "bybit", "bitget", "gate"],
         ),
         alert_settings=AlertSettings(alerts_enabled=True),
         redis_factory=lambda _: redis_client,
@@ -604,7 +608,7 @@ async def test_worker_app_dispatches_arb_executor_role(monkeypatch):
         settings=WorkerSettings(
             worker_role="arb_executor",
             node_id="node-a",
-            spot_exchanges=["okx", "gate"],
+            spot_exchanges=["okx", "binance", "bybit", "bitget", "gate"],
         ),
         alert_settings=AlertSettings(alerts_enabled=True),
         redis_factory=lambda _: redis_client,
@@ -626,7 +630,7 @@ async def test_worker_app_runs_repair_role(monkeypatch):
             worker_role="repair",
             worker_region="node-a",
             node_id="node-a",
-            spot_exchanges=["okx", "gate"],
+            spot_exchanges=["okx", "binance", "bybit", "bitget", "gate"],
         ),
         alert_settings=AlertSettings(alerts_enabled=True),
         redis_factory=lambda _: redis_client,
@@ -646,7 +650,7 @@ async def test_worker_app_executor_does_not_require_env_exchange_credentials(mon
         settings=WorkerSettings(
             worker_role="executor",
             node_id="node-a",
-            spot_exchanges=["okx", "gate"],
+            spot_exchanges=["okx", "binance", "bybit", "bitget", "gate"],
             env_mode="testnet",
         ),
         alert_settings=AlertSettings(alerts_enabled=True),
@@ -674,7 +678,7 @@ async def test_worker_app_scanner_failure_bubbles_and_closes_redis(monkeypatch):
     redis_client = FakeRedis()
     settings = WorkerSettings(
         worker_role="scanner",
-        spot_exchanges=["okx", "bitget"],
+        spot_exchanges=["okx", "binance", "bybit", "bitget", "gate"],
         spot_symbols=["BTC/USDT", "ETH/USDT"],
     )
     factory = FakeFactory(settings=settings)

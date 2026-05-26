@@ -154,16 +154,33 @@ def test_load_exchange_credentials_and_proxies_from_env(monkeypatch):
     monkeypatch.setenv("OKX_PROXY_PORT", "8080")
     monkeypatch.setenv("OKX_PROXY_USERNAME", "alice")
     monkeypatch.setenv("OKX_PROXY_PASSWORD", "secret")
+    monkeypatch.setenv("BINANCE_API_KEY", "binance-key")
+    monkeypatch.setenv("BINANCE_SECRET", "binance-secret")
+    monkeypatch.setenv("BYBIT_API_KEY", "bybit-key")
+    monkeypatch.setenv("BYBIT_SECRET", "bybit-secret")
+    monkeypatch.setenv("BITGET_API_KEY", "bitget-key")
+    monkeypatch.setenv("BITGET_SECRET", "bitget-secret")
+    monkeypatch.setenv("BITGET_PASSWORD", "bitget-pass")
 
     single = load_exchange_credential_from_env("okx")
-    credentials = load_exchange_credentials_from_env(["okx", "gate"])
-    proxies = load_exchange_proxies_from_env(["okx", "gate"])
+    credentials = load_exchange_credentials_from_env(["okx", "binance", "bybit", "bitget", "gate"])
+    proxies = load_exchange_proxies_from_env(["okx", "binance", "bybit", "bitget", "gate"])
 
     assert single is not None
     assert single.api_key == "okx-key"
     assert credentials["okx"].secret == "okx-secret"
+    assert credentials["binance"].api_key == "binance-key"
+    assert credentials["binance"].secret == "binance-secret"
+    assert credentials["bybit"].api_key == "bybit-key"
+    assert credentials["bybit"].secret == "bybit-secret"
+    assert credentials["bitget"].api_key == "bitget-key"
+    assert credentials["bitget"].secret == "bitget-secret"
+    assert credentials["bitget"].password == "bitget-pass"
     assert "gate" not in credentials
     assert proxies["okx"]["http"] == "http://alice:secret@127.0.0.1:8080"
+    assert "binance" not in proxies
+    assert "bybit" not in proxies
+    assert "bitget" not in proxies
     assert "gate" not in proxies
 
 

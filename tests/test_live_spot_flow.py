@@ -49,6 +49,20 @@ class FakeFactory:
                     "asks": [[101.0, 1.0]],
                 }
             ),
+            "binance": FakeClient(
+                {
+                    "symbol": "BTC/USDT",
+                    "bids": [[97.0, 1.0]],
+                    "asks": [[98.0, 1.0], [98.5, 1.0]],
+                }
+            ),
+            "bybit": FakeClient(
+                {
+                    "symbol": "BTC/USDT",
+                    "bids": [[104.0, 0.5], [103.5, 0.5]],
+                    "asks": [[105.0, 1.0]],
+                }
+            ),
             "bitget": FakeClient(
                 {
                     "symbol": "BTC/USDT",
@@ -131,9 +145,11 @@ async def test_live_flow_returns_spot_opportunity_without_inline_dispatch_by_def
     )
 
     result = await flow.run_once(
-        exchanges=["okx", "bitget", "gate"],
+        exchanges=["okx", "binance", "bybit", "bitget", "gate"],
         credentials_by_exchange={
             "okx": ExchangeCredentials(api_key="a", secret="b"),
+            "binance": object(),
+            "bybit": object(),
             "bitget": ExchangeCredentials(api_key="a", secret="b"),
             "gate": ExchangeCredentials(api_key="a", secret="b"),
         },
@@ -141,8 +157,8 @@ async def test_live_flow_returns_spot_opportunity_without_inline_dispatch_by_def
     )
 
     assert isinstance(result, SpotOpportunity)
-    assert result.buy_exchange == "bitget"
-    assert result.sell_exchange == "gate"
+    assert result.buy_exchange == "binance"
+    assert result.sell_exchange == "bybit"
     assert result.effective_buy_price > result.buy_ask
     assert result.effective_sell_price < result.sell_bid
     assert result.target_quote_amount == 100.0
@@ -167,9 +183,11 @@ async def test_live_flow_can_optionally_inline_dispatch_payload():
     )
 
     result = await flow.run_once(
-        exchanges=["okx", "bitget", "gate"],
+        exchanges=["okx", "binance", "bybit", "bitget", "gate"],
         credentials_by_exchange={
             "okx": ExchangeCredentials(api_key="a", secret="b"),
+            "binance": object(),
+            "bybit": object(),
             "bitget": ExchangeCredentials(api_key="a", secret="b"),
             "gate": ExchangeCredentials(api_key="a", secret="b"),
         },
@@ -177,7 +195,7 @@ async def test_live_flow_can_optionally_inline_dispatch_payload():
     )
 
     assert isinstance(result, SpotOpportunity)
-    assert service.calls[0]["exchanges"] == ["bitget", "gate"]
+    assert service.calls[0]["exchanges"] == ["binance", "bybit"]
 
 
 @pytest.mark.asyncio
@@ -192,9 +210,11 @@ async def test_live_flow_uses_requested_orderbook_depth_limit_and_quote_amount()
     )
 
     result = await flow.run_once(
-        exchanges=["okx", "bitget", "gate"],
+        exchanges=["okx", "binance", "bybit", "bitget", "gate"],
         credentials_by_exchange={
             "okx": ExchangeCredentials(api_key="a", secret="b"),
+            "binance": object(),
+            "bybit": object(),
             "bitget": ExchangeCredentials(api_key="a", secret="b"),
             "gate": ExchangeCredentials(api_key="a", secret="b"),
         },
@@ -222,9 +242,11 @@ async def test_live_flow_closes_all_sessions_after_success():
     )
 
     await flow.run_once(
-        exchanges=["okx", "bitget", "gate"],
+        exchanges=["okx", "binance", "bybit", "bitget", "gate"],
         credentials_by_exchange={
             "okx": ExchangeCredentials(api_key="a", secret="b"),
+            "binance": object(),
+            "bybit": object(),
             "bitget": ExchangeCredentials(api_key="a", secret="b"),
             "gate": ExchangeCredentials(api_key="a", secret="b"),
         },
@@ -250,9 +272,11 @@ async def test_live_flow_closes_created_sessions_when_fetch_fails():
 
     with pytest.raises(RuntimeError, match="fetch orderbook failed"):
         await flow.run_once(
-            exchanges=["okx", "bitget", "gate"],
+            exchanges=["okx", "binance", "bybit", "bitget", "gate"],
             credentials_by_exchange={
                 "okx": ExchangeCredentials(api_key="a", secret="b"),
+                "binance": object(),
+                "bybit": object(),
                 "bitget": ExchangeCredentials(api_key="a", secret="b"),
                 "gate": ExchangeCredentials(api_key="a", secret="b"),
             },
