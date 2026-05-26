@@ -123,6 +123,7 @@ class AlertSettings(BaseSettings):
     alert_email_to: Annotated[list[str], NoDecode] = Field(default_factory=list)
     alert_success_spread_bps_threshold: float = 0.0
     alert_dedupe_window_seconds: int = 60
+    alert_opportunity_feishu_enabled: bool = False
 
     @field_validator("alert_email_to", mode="before")
     @classmethod

@@ -211,6 +211,7 @@ class AlertRouter:
     email_enabled: bool = True
     success_spread_bps_threshold: float = 0.0
     dedupe_window_seconds: int = 60
+    opportunity_feishu_enabled: bool = False
     time_provider: Callable[[], float] = field(default_factory=lambda: time)
     _dedupe_cache: dict[str, float] = field(default_factory=dict)
 
@@ -228,6 +229,8 @@ class AlertRouter:
             await self._send_feishu(event)
             return
         if event.level == "INFO" and event.event_type == "opportunity.detected":
+            if not self.opportunity_feishu_enabled:
+                return
             spread_bps = float(event.payload.get("spread_bps", 0.0))
             if spread_bps > self.success_spread_bps_threshold:
                 await self._send_feishu(event)

@@ -85,6 +85,7 @@ def build_router():
         email_enabled=True,
         success_spread_bps_threshold=50.0,
         dedupe_window_seconds=60,
+        opportunity_feishu_enabled=True,
         time_provider=lambda: 100.0,
     )
 
@@ -557,6 +558,36 @@ async def test_alert_router_routes_opportunity_only_above_threshold():
     assert len(router.logger.events) == 2
     assert len(router.feishu_notifier.events) == 1
     assert router.feishu_notifier.events[0].payload["spread_bps"] == 50.1
+    assert len(router.email_notifier.events) == 0
+
+
+@pytest.mark.asyncio
+async def test_alert_router_suppresses_opportunity_feishu_when_disabled():
+    router = AlertRouter(
+        logger=FakeLogger(),
+        feishu_notifier=FakeNotifier(),
+        email_notifier=FakeNotifier(),
+        alerts_enabled=True,
+        feishu_enabled=True,
+        email_enabled=True,
+        success_spread_bps_threshold=0.0,
+        dedupe_window_seconds=60,
+        opportunity_feishu_enabled=False,
+        time_provider=lambda: 100.0,
+    )
+    event = RuntimeEvent(
+        event_type="opportunity.detected",
+        level="INFO",
+        service="scanner",
+        message="opportunity detected",
+        symbol="BTC/USDT",
+        payload={"spread_bps": 100.0},
+    )
+
+    await router.dispatch(event)
+
+    assert len(router.logger.events) == 1
+    assert len(router.feishu_notifier.events) == 0
     assert len(router.email_notifier.events) == 0
 
 

@@ -344,6 +344,7 @@ def build_event_router(alert_settings: AlertSettings) -> AlertRouter:
         email_enabled=alert_settings.alert_email_enabled,
         success_spread_bps_threshold=alert_settings.alert_success_spread_bps_threshold,
         dedupe_window_seconds=alert_settings.alert_dedupe_window_seconds,
+        opportunity_feishu_enabled=alert_settings.alert_opportunity_feishu_enabled,
     )
 
 
