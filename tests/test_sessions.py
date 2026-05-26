@@ -143,8 +143,8 @@ def test_exchange_factory_creates_bybit_session():
 
     assert session.exchange == "bybit"
     assert session.env_mode == "testnet"
-    assert session.client.config["apiKey"] == "bybit-key"
-    assert session.client.sandbox_enabled is False
+    assert "apiKey" not in session.client.config
+    assert session.client.sandbox_enabled is True
     assert session.client.urls["api"]["public"] == "https://api-demo.bybit.com"
 
 

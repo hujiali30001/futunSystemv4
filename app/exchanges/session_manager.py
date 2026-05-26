@@ -71,7 +71,8 @@ class ExchangeClientFactory:
             "enableRateLimit": True,
             "proxies": proxies,
         }
-        if credentials is not None:
+        demo_bybit = exchange == "bybit" and env_mode == "testnet"
+        if credentials is not None and not demo_bybit:
             config["apiKey"] = credentials.api_key
             config["secret"] = credentials.secret
             if credentials.password:
@@ -79,6 +80,8 @@ class ExchangeClientFactory:
 
         client = exchange_class(config)
         if env_mode == "testnet" and exchange == "bybit" and hasattr(client, "urls"):
+            if hasattr(client, "set_sandbox_mode"):
+                client.set_sandbox_mode(True)
             client.urls["api"] = {
                 "public": "https://api-demo.bybit.com",
                 "private": "https://api-demo.bybit.com",
