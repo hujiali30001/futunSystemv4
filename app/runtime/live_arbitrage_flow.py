@@ -1,9 +1,84 @@
-from app.market.opportunity import ArbitrageOpportunity, OpportunityCalculator, OrderbookSnapshot
+import asyncio
+
+from app.exchanges.adapters import ExchangeAdapter
+from app.exchanges.session_manager import ExchangeAccountSession, ExchangeClientFactory
+from app.market.opportunity import (
+    ArbitrageOpportunity,
+    OpportunityCalculator,
+    OrderbookSnapshot,
+)
 from app.runtime.redis_flow import ArbitrageOpportunityPublisher
 
 
+class SwapSymbolDiscovery:
+    def __init__(self, session_factory: ExchangeClientFactory) -> None:
+        self.session_factory = session_factory
+
+    async def discover(
+        self,
+        *,
+        exchanges: list[str],
+        proxies_by_exchange: dict[str, dict[str, str]] | None = None,
+        min_exchange_count: int = 2,
+    ) -> dict[str, dict[str, str]]:
+        symbol_to_swap: dict[str, dict[str, str]] = {}
+        for exchange in exchanges:
+            session = self.session_factory.create_session(
+                exchange=exchange,
+                env_mode="live",
+                proxies=(proxies_by_exchange or {}).get(exchange, {}),
+                credentials=None,
+            )
+            try:
+                await session.mark_ready()
+                for symbol, swap_symbol in self._extract_spot_to_swap(session.markets).items():
+                    if symbol not in symbol_to_swap:
+                        symbol_to_swap[symbol] = {}
+                    symbol_to_swap[symbol][exchange] = swap_symbol
+            finally:
+                await session.close()
+
+        return {
+            sym: mappings
+            for sym, mappings in sorted(symbol_to_swap.items())
+            if len(mappings) >= min_exchange_count
+        }
+
+    @staticmethod
+    def _extract_spot_to_swap(markets: dict) -> dict[str, str]:
+        swap_by_base: dict[str, str] = {}
+        for swap_symbol, market in markets.items():
+            if market.get("type") != "swap":
+                continue
+            if str(market.get("quote", "")).upper() != "USDT":
+                continue
+            if not market.get("linear"):
+                continue
+            if not market.get("active", True):
+                continue
+            base = str(market.get("base", ""))
+            swap_by_base[base] = swap_symbol
+
+        mapping: dict[str, str] = {}
+        for spot_symbol, market in markets.items():
+            if market.get("type") not in (None, "", "spot"):
+                continue
+            if str(market.get("quote", "")).upper() != "USDT":
+                continue
+            if not market.get("active", True):
+                continue
+            base = str(market.get("base", ""))
+            swap_symbol = swap_by_base.get(base)
+            if swap_symbol is not None:
+                mapping[spot_symbol] = swap_symbol
+
+        return mapping
+
+
 class LiveArbitrageFlowService:
-    def __init__(self, *, redis_client) -> None:
+    def __init__(self, *, redis_client, session_factory=None) -> None:
+        self.redis_client = redis_client
+        self.session_factory = session_factory or ExchangeClientFactory()
         self.calculator = OpportunityCalculator()
         self.publisher = ArbitrageOpportunityPublisher(redis_client)
 
@@ -47,3 +122,130 @@ class LiveArbitrageFlowService:
     def _ensure_snapshot(snapshot: object, *, name: str) -> None:
         if not isinstance(snapshot, OrderbookSnapshot):
             raise TypeError(f"{name} must be an OrderbookSnapshot")
+
+    async def run_batch(
+        self,
+        *,
+        exchanges: list[str],
+        credentials_by_exchange: dict,
+        symbol_swap_map: dict[str, dict[str, str]],
+        env_mode: str = "testnet",
+        proxies_by_exchange: dict[str, dict[str, str]] | None = None,
+        orderbook_depth_limit: int = 5,
+        concurrency: int = 10,
+    ) -> list[dict]:
+        sessions: dict[str, ExchangeAccountSession] = {}
+        adapters: dict[str, ExchangeAdapter] = {}
+        try:
+            for exchange in exchanges:
+                session = self.session_factory.create_session(
+                    exchange=exchange,
+                    env_mode=env_mode,
+                    proxies=(proxies_by_exchange or {}).get(exchange, {}),
+                    credentials=credentials_by_exchange[exchange],
+                )
+                await session.mark_ready()
+                sessions[exchange] = session
+                adapters[exchange] = ExchangeAdapter(session)
+
+            sem = asyncio.Semaphore(concurrency)
+            results: list[dict] = []
+
+            async def _scan_one(symbol: str) -> None:
+                ex_swaps = symbol_swap_map.get(symbol, {})
+                if not ex_swaps:
+                    return
+                async with sem:
+                    for exchange, swap_symbol in ex_swaps.items():
+                        spot_adapter = adapters.get(exchange)
+                        if spot_adapter is None:
+                            continue
+                        try:
+                            spot_ob = await spot_adapter.fetch_orderbook(
+                                symbol, limit=orderbook_depth_limit
+                            )
+                        except Exception:
+                            continue
+                        try:
+                            swap_ob = await spot_adapter.fetch_orderbook(
+                                swap_symbol, limit=orderbook_depth_limit
+                            )
+                        except Exception:
+                            continue
+
+                        funding_rate = 0.0
+                        try:
+                            fr_data = await _fetch_funding_rate_safe(
+                                spot_adapter, swap_symbol
+                            )
+                            if isinstance(fr_data, dict):
+                                funding_rate = float(
+                                    fr_data.get("fundingRate", 0)
+                                    or fr_data.get("funding_rate", 0)
+                                    or 0
+                                )
+                        except Exception:
+                            pass
+
+                        spot_snapshot = OrderbookSnapshot(
+                            best_bid=float(spot_ob["bids"][0][0]),
+                            best_ask=float(spot_ob["asks"][0][0]),
+                            bids=spot_ob["bids"],
+                            asks=spot_ob["asks"],
+                        )
+                        derivative_snapshot = OrderbookSnapshot(
+                            best_bid=float(swap_ob["bids"][0][0]),
+                            best_ask=float(swap_ob["asks"][0][0]),
+                            bids=swap_ob["bids"],
+                            asks=swap_ob["asks"],
+                        )
+                        try:
+                            open_opp, close_opp = await self.publish_snapshots(
+                                symbol=symbol,
+                                spot_exchange=exchange,
+                                derivative_exchange=exchange,
+                                spot_snapshot=spot_snapshot,
+                                derivative_snapshot=derivative_snapshot,
+                                funding_rate=funding_rate,
+                            )
+                            results.append(
+                                {
+                                    "symbol": symbol,
+                                    "exchange": exchange,
+                                    "open_spread_bps": open_opp.open_spread_bps,
+                                    "close_spread_bps": close_opp.close_spread_bps,
+                                    "funding_rate": funding_rate,
+                                }
+                            )
+                        except Exception:
+                            continue
+
+            await asyncio.gather(
+                *[_scan_one(s) for s in symbol_swap_map],
+                return_exceptions=True,
+            )
+            return results
+        finally:
+            await asyncio.gather(
+                *[adapter.close() for adapter in adapters.values()],
+                return_exceptions=True,
+            )
+
+
+async def _fetch_funding_rate_safe(
+    adapter: ExchangeAdapter, swap_symbol: str
+) -> dict | None:
+    client = adapter.session.client
+    if client is None:
+        return None
+    try:
+        if hasattr(client, "fetch_funding_rate"):
+            return await client.fetch_funding_rate(swap_symbol)
+        if hasattr(client, "fetch_funding_rate_history"):
+            result = await client.fetch_funding_rate_history(swap_symbol)
+            if isinstance(result, list) and result:
+                return result[-1]
+            return result
+    except Exception:
+        pass
+    return None

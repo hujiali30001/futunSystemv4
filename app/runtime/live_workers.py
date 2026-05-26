@@ -1400,6 +1400,97 @@ class ContinuousSpotScanner:
                 await asyncio.sleep(self.poll_interval_seconds)
 
 
+class ContinuousArbitrageScanner:
+    def __init__(
+        self,
+        *,
+        flow_service,
+        poll_interval_seconds: float = 5.0,
+        event_router=None,
+        region: str = "default",
+    ) -> None:
+        self.flow_service = flow_service
+        self.poll_interval_seconds = poll_interval_seconds
+        self.event_router = event_router
+        self.region = region
+
+    async def run(
+        self,
+        *,
+        exchanges: list[str],
+        credentials_by_exchange: dict,
+        symbol_swap_map: dict[str, dict[str, str]],
+        env_mode: str = "testnet",
+        proxies_by_exchange: dict[str, dict[str, str]] | None = None,
+        orderbook_depth_limit: int = 5,
+        max_iterations: int | None = None,
+        batch_concurrency: int = 8,
+    ) -> None:
+        iteration = 0
+        while max_iterations is None or iteration < max_iterations:
+            try:
+                results = await self.flow_service.run_batch(
+                    exchanges=exchanges,
+                    credentials_by_exchange=credentials_by_exchange,
+                    symbol_swap_map=symbol_swap_map,
+                    env_mode=env_mode,
+                    proxies_by_exchange=proxies_by_exchange,
+                    orderbook_depth_limit=orderbook_depth_limit,
+                    concurrency=batch_concurrency,
+                )
+                for r in results:
+                    if self.event_router is not None:
+                        await self.event_router.dispatch(
+                            RuntimeEvent(
+                                event_type="arbitrage.opportunity.detected",
+                                level="INFO",
+                                service="arb_scanner",
+                                region=self.region,
+                                symbol=r["symbol"],
+                                exchange=r["exchange"],
+                                message="arbitrage opportunity detected",
+                                payload={
+                                    "symbol": r["symbol"],
+                                    "exchange": r["exchange"],
+                                    "open_spread_bps": r["open_spread_bps"],
+                                    "close_spread_bps": r["close_spread_bps"],
+                                    "funding_rate": r["funding_rate"],
+                                },
+                            )
+                        )
+                if self.event_router is not None:
+                    await self.event_router.dispatch(
+                        RuntimeEvent(
+                            event_type="arb_scanner.iteration.succeeded",
+                            level="INFO",
+                            service="arb_scanner",
+                            region=self.region,
+                            symbol=None,
+                            message="arbitrage scanner iteration succeeded",
+                            payload={
+                                "exchanges": exchanges,
+                                "symbols_count": len(symbol_swap_map),
+                                "opportunities_count": len(results),
+                            },
+                        )
+                    )
+            except Exception as exc:
+                if self.event_router is not None:
+                    await self.event_router.dispatch(
+                        RuntimeEvent(
+                            event_type="arb_scanner.iteration.failed",
+                            level="ERROR",
+                            service="arb_scanner",
+                            region=self.region,
+                            message="arbitrage scanner iteration failed",
+                            payload={"error": str(exc)},
+                        )
+                    )
+            iteration += 1
+            if max_iterations is None or iteration < max_iterations:
+                await asyncio.sleep(self.poll_interval_seconds)
+
+
 class RedisSpotConsumer:
     processed_event_type = "consumer.message.processed"
     processed_event_service = "consumer"

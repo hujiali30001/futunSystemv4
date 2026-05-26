@@ -20,9 +20,14 @@ from app.runtime.alerting import (
 )
 from app.runtime.arbitrage_execution_adapter import ArbitrageExecutionAdapter
 from app.runtime.executor_account_truth import ExecutorAccountTruthResolver
+from app.runtime.live_arbitrage_flow import (
+    LiveArbitrageFlowService,
+    SwapSymbolDiscovery,
+)
 from app.runtime.live_spot_flow import LiveSpotFlowService, SymbolDiscovery
 from app.runtime.live_workers import (
     ArbitrageExecutionTaskConsumer,
+    ContinuousArbitrageScanner,
     ControlGuard,
     ControlPlaneLoader,
     ContinuousSpotScanner,
@@ -94,6 +99,66 @@ class ScannerWorker:
         )
 
 
+class ArbitrageScannerWorker:
+    def __init__(
+        self, scanner: ContinuousArbitrageScanner, settings: WorkerSettings
+    ) -> None:
+        self.scanner = scanner
+        self.settings = settings
+
+    async def run(
+        self,
+        *,
+        exchanges: list[str],
+        credentials_by_exchange: dict,
+        proxies_by_exchange: dict,
+    ) -> None:
+        symbols = self.settings.active_spot_symbols
+        if symbols == ["__auto__"]:
+            discovery = SwapSymbolDiscovery(self.scanner.flow_service.session_factory)
+            symbol_swap_map = await discovery.discover(
+                exchanges=exchanges,
+                proxies_by_exchange=proxies_by_exchange,
+            )
+            if not symbol_swap_map:
+                raise RuntimeError(
+                    "arbitrage symbol discovery returned zero symbols across "
+                    f"{exchanges}"
+                )
+        else:
+            symbol_swap_map = await _build_fallback_swap_map(
+                symbols=symbols,
+                exchanges=exchanges,
+                session_factory=self.scanner.flow_service.session_factory,
+                proxies_by_exchange=proxies_by_exchange,
+            )
+
+        await self.scanner.run(
+            exchanges=exchanges,
+            credentials_by_exchange=credentials_by_exchange,
+            symbol_swap_map=symbol_swap_map,
+            env_mode=self.settings.env_mode,
+            proxies_by_exchange=proxies_by_exchange,
+            orderbook_depth_limit=self.settings.orderbook_depth_limit,
+            max_iterations=None,
+        )
+
+
+async def _build_fallback_swap_map(
+    *,
+    symbols: list[str],
+    exchanges: list[str],
+    session_factory,
+    proxies_by_exchange: dict | None = None,
+) -> dict[str, dict[str, str]]:
+    discovery = SwapSymbolDiscovery(session_factory)
+    return await discovery.discover(
+        exchanges=exchanges,
+        proxies_by_exchange=proxies_by_exchange,
+        min_exchange_count=1,
+    )
+
+
 class ConsumerWorker:
     def __init__(self, consumer: RedisSpotConsumer) -> None:
         self.consumer = consumer
@@ -158,6 +223,21 @@ class DefaultWorkerFactory:
             region=self.settings.worker_region,
         )
         return ScannerWorker(scanner=scanner, settings=self.settings)
+
+    def build_arbitrage_scanner_worker(
+        self, *, redis_client: Redis
+    ) -> ArbitrageScannerWorker:
+        flow_service = LiveArbitrageFlowService(
+            redis_client=redis_client,
+            session_factory=self.session_factory,
+        )
+        scanner = ContinuousArbitrageScanner(
+            flow_service=flow_service,
+            poll_interval_seconds=self.settings.arb_scanner_poll_interval_seconds,
+            event_router=self.event_router,
+            region=self.settings.worker_region,
+        )
+        return ArbitrageScannerWorker(scanner=scanner, settings=self.settings)
 
     def build_consumer_worker(self, *, redis_client: Redis) -> ConsumerWorker:
         dispatcher = RedisOpportunityDispatcher(self.spot_service)
@@ -408,6 +488,17 @@ class WorkerApp:
         try:
             if self.settings.worker_role == "scanner":
                 worker = factory.build_scanner_worker(redis_client=redis_client)
+                await worker.run(
+                    exchanges=exchanges,
+                    credentials_by_exchange=credentials_by_exchange,
+                    proxies_by_exchange=proxies_by_exchange,
+                )
+                return
+
+            if self.settings.worker_role == "arb_scanner":
+                worker = factory.build_arbitrage_scanner_worker(
+                    redis_client=redis_client
+                )
                 await worker.run(
                     exchanges=exchanges,
                     credentials_by_exchange=credentials_by_exchange,
