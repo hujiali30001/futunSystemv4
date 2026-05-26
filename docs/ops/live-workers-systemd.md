@@ -19,7 +19,7 @@
 - `consumer.message.processed` no longer sends external notifications.
 - `ALERT_SUCCESS_SPREAD_BPS_THRESHOLD` controls the threshold Feishu uses for `opportunity.detected`; only values strictly above it send success notifications, and the default tuned value is `20`.
 - `ALERT_DEDUPE_WINDOW_SECONDS` controls Feishu dedupe for repeated `ERROR` events; the default tuned value is `300`.
-- Exchange credentials still come from `OKX_*`, `BITGET_*`, and `GATE_*`; a missing required key should raise `worker.start_failed` and fan out to Feishu plus QQ email.
+- Exchange credentials still come from `OKX_*`, `BINANCE_*`, `BYBIT_*`, `BITGET_*`, and `GATE_*`; a missing required key should raise `worker.start_failed` and fan out to Feishu plus QQ email.
 - Spot scanner whitelist and depth controls now come from `SPOT_SYMBOLS`, `ORDERBOOK_DEPTH_LIMIT`, and `TARGET_QUOTE_AMOUNT`; `SPOT_SYMBOL` remains the single-symbol fallback when `SPOT_SYMBOLS` is empty.
 - Node roles now come from `WORKER_ROLE`, `WORKER_REGION`, `NODE_ID`, `DISPATCH_USER_IDS`, `USER_NODE_ROUTES`, `DISPATCH_SOURCE_STREAM`, `EXECUTOR_STREAM_KEY`, and `REPAIR_STREAM_KEY`.
 - `dispatcher` 启动时会把 `USER_NODE_ROUTES` 自动同步到 Redis `route:user_node:{user_id}`，不再依赖手工逐条执行 `redis-cli set`.
@@ -127,7 +127,7 @@ EXECUTOR_STREAM_KEY=stream:spot_exec_tasks:main
 REPAIR_STREAM_KEY=stream:repair_tasks:main
 SPOT_SYMBOL=BTC/USDT
 SPOT_SYMBOLS=BTC/USDT,ETH/USDT,SOL/USDT
-SPOT_EXCHANGES=okx,bitget,gate
+SPOT_EXCHANGES=okx,binance,bybit,bitget,gate
 ORDERBOOK_DEPTH_LIMIT=5
 TARGET_QUOTE_AMOUNT=100.0
 SCANNER_POLL_INTERVAL_SECONDS=1.0
@@ -150,6 +150,12 @@ ALERT_DEDUPE_WINDOW_SECONDS=300
 OKX_API_KEY=<模拟盘 key>
 OKX_SECRET=<模拟盘 secret>
 OKX_PASSWORD=<如有则填写>
+BINANCE_API_KEY=<模拟盘 key>
+BINANCE_SECRET=<模拟盘 secret>
+BINANCE_PASSWORD=<如有则填写>
+BYBIT_API_KEY=<模拟盘 key>
+BYBIT_SECRET=<模拟盘 secret>
+BYBIT_PASSWORD=<如有则填写>
 BITGET_API_KEY=<模拟盘 key>
 BITGET_SECRET=<模拟盘 secret>
 BITGET_PASSWORD=<如有则填写>
@@ -174,6 +180,10 @@ $qqPass = [regex]::Match($qqSecretText, "授权码\s*([A-Za-z0-9]+)").Groups[1].
 $okxKey = [regex]::Match($exchangeText, 'apikey\s*=\s*"([^"]+)"').Groups[1].Value
 $okxSecret = [regex]::Match($exchangeText, 'secretkey\s*=\s*"([^"]+)"').Groups[1].Value
 $okxPassword = [regex]::Match($exchangeText, "密码\s+([^\r\n]+)").Groups[1].Value.Trim()
+$binanceKey = [regex]::Match($exchangeText, "binance[\s\S]*?apikey\s*=\s*`"([^`"]+)`"").Groups[1].Value
+$binanceSecret = [regex]::Match($exchangeText, "binance[\s\S]*?secretkey\s*=\s*`"([^`"]+)`"").Groups[1].Value
+$bybitKey = [regex]::Match($exchangeText, "bybit[\s\S]*?apikey\s*=\s*`"([^`"]+)`"").Groups[1].Value
+$bybitSecret = [regex]::Match($exchangeText, "bybit[\s\S]*?secretkey\s*=\s*`"([^`"]+)`"").Groups[1].Value
 $bitgetKey = [regex]::Match($exchangeText, "API Key\\s*:\\s*([^\r\n]+)").Groups[1].Value.Trim()
 $bitgetSecret = [regex]::Match($exchangeText, "API Secret\\s*:\\s*([^\r\n]+)").Groups[1].Value.Trim()
 $bitgetPassword = [regex]::Match($exchangeText, "Passphrase\\s*:\\s*([^\r\n]+)").Groups[1].Value.Trim()
@@ -193,7 +203,7 @@ EXECUTOR_STREAM_KEY=stream:spot_exec_tasks:main
 REPAIR_STREAM_KEY=stream:repair_tasks:main
 SPOT_SYMBOL=BTC/USDT
 SPOT_SYMBOLS=BTC/USDT,ETH/USDT,SOL/USDT
-SPOT_EXCHANGES=okx,bitget,gate
+SPOT_EXCHANGES=okx,binance,bybit,bitget,gate
 ORDERBOOK_DEPTH_LIMIT=5
 TARGET_QUOTE_AMOUNT=100.0
 SCANNER_POLL_INTERVAL_SECONDS=1.0
@@ -212,6 +222,12 @@ ALERT_DEDUPE_WINDOW_SECONDS=300
 OKX_API_KEY=$okxKey
 OKX_SECRET=$okxSecret
 OKX_PASSWORD=$okxPassword
+BINANCE_API_KEY=$binanceKey
+BINANCE_SECRET=$binanceSecret
+BINANCE_PASSWORD=
+BYBIT_API_KEY=$bybitKey
+BYBIT_SECRET=$bybitSecret
+BYBIT_PASSWORD=
 BITGET_API_KEY=$bitgetKey
 BITGET_SECRET=$bitgetSecret
 BITGET_PASSWORD=$bitgetPassword
