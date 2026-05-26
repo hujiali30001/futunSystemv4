@@ -6,6 +6,7 @@
 - `deploy/systemd/furun-spot-consumer.service`
 - `deploy/systemd/furun-spot-dispatcher.service`
 - `deploy/systemd/furun-spot-executor.service`
+- `deploy/systemd/furun-spot-repair.service`
 - `deploy/systemd/furun-route-admin.service`
 - `deploy/systemd/furun-control-admin.service`
 - `deploy/systemd/.env.worker.example`
@@ -20,7 +21,7 @@
 - `ALERT_DEDUPE_WINDOW_SECONDS` controls Feishu dedupe for repeated `ERROR` events; the default tuned value is `300`.
 - Exchange credentials still come from `OKX_*`, `BITGET_*`, and `GATE_*`; a missing required key should raise `worker.start_failed` and fan out to Feishu plus QQ email.
 - Spot scanner whitelist and depth controls now come from `SPOT_SYMBOLS`, `ORDERBOOK_DEPTH_LIMIT`, and `TARGET_QUOTE_AMOUNT`; `SPOT_SYMBOL` remains the single-symbol fallback when `SPOT_SYMBOLS` is empty.
-- Node roles now come from `WORKER_ROLE`, `WORKER_REGION`, `NODE_ID`, `DISPATCH_USER_IDS`, `USER_NODE_ROUTES`, `DISPATCH_SOURCE_STREAM`, and `EXECUTOR_STREAM_KEY`.
+- Node roles now come from `WORKER_ROLE`, `WORKER_REGION`, `NODE_ID`, `DISPATCH_USER_IDS`, `USER_NODE_ROUTES`, `DISPATCH_SOURCE_STREAM`, `EXECUTOR_STREAM_KEY`, and `REPAIR_STREAM_KEY`.
 - `dispatcher` 启动时会把 `USER_NODE_ROUTES` 自动同步到 Redis `route:user_node:{user_id}`，不再依赖手工逐条执行 `redis-cli set`.
 - Route admin 配置来自 `ROUTE_ADMIN_ENABLED`、`ROUTE_ADMIN_BIND_HOST`、`ROUTE_ADMIN_PORT`、`ROUTE_ADMIN_TOKEN`，建议默认只监听 `127.0.0.1`。
 - Control admin 配置来自 `CONTROL_ADMIN_ENABLED`、`CONTROL_ADMIN_BIND_HOST`、`CONTROL_ADMIN_PORT`、`CONTROL_ADMIN_TOKEN`，建议默认只监听 `127.0.0.1`。
@@ -30,6 +31,7 @@
 - 主服务器运行 `furun-spot-scanner.service` 与 `furun-spot-dispatcher.service`
 - 主服务器可同时运行 `furun-route-admin.service` 与 `furun-control-admin.service`
 - 专用执行节点运行 `furun-spot-executor.service`
+- repair 节点或同类执行节点运行 `furun-spot-repair.service`
 - 迁移期如需保留旧链路，可暂时继续运行 `furun-spot-consumer.service`，但目标形态是不再让专用执行节点消费公共 `stream:spot_opps`
 
 ## Windows Sync
@@ -86,6 +88,7 @@ Copy-Item -Force "d:\old\FuRunSystemV4\.keys\futunsystemv3_deploy_ed25519" $keyP
 & "C:\Windows\System32\OpenSSH\scp.exe" -o StrictHostKeyChecking=no -i $keyPath `
   "d:\old\FuRunSystemV4\deploy\systemd\.env.worker.example" `
   "d:\old\FuRunSystemV4\deploy\systemd\furun-control-admin.service" `
+  "d:\old\FuRunSystemV4\deploy\systemd\furun-spot-repair.service" `
   ubuntu@43.165.166.57:/home/ubuntu/furunsystemv4/current/deploy/systemd/
 
 & "C:\Windows\System32\OpenSSH\scp.exe" -o StrictHostKeyChecking=no -i $keyPath `
@@ -121,6 +124,7 @@ DISPATCH_USER_IDS=42,99
 USER_NODE_ROUTES=42:node-a,99:main
 DISPATCH_SOURCE_STREAM=stream:spot_opps
 EXECUTOR_STREAM_KEY=stream:spot_exec_tasks:main
+REPAIR_STREAM_KEY=stream:repair_tasks:main
 SPOT_SYMBOL=BTC/USDT
 SPOT_SYMBOLS=BTC/USDT,ETH/USDT,SOL/USDT
 SPOT_EXCHANGES=okx,bitget,gate
@@ -186,6 +190,7 @@ DISPATCH_USER_IDS=42,99
 USER_NODE_ROUTES=42:node-a,99:main
 DISPATCH_SOURCE_STREAM=stream:spot_opps
 EXECUTOR_STREAM_KEY=stream:spot_exec_tasks:main
+REPAIR_STREAM_KEY=stream:repair_tasks:main
 SPOT_SYMBOL=BTC/USDT
 SPOT_SYMBOLS=BTC/USDT,ETH/USDT,SOL/USDT
 SPOT_EXCHANGES=okx,bitget,gate
@@ -236,6 +241,7 @@ sudo cp deploy/systemd/furun-spot-scanner.service /etc/systemd/system/
 sudo cp deploy/systemd/furun-spot-consumer.service /etc/systemd/system/
 sudo cp deploy/systemd/furun-spot-dispatcher.service /etc/systemd/system/
 sudo cp deploy/systemd/furun-spot-executor.service /etc/systemd/system/
+sudo cp deploy/systemd/furun-spot-repair.service /etc/systemd/system/
 sudo cp deploy/systemd/furun-route-admin.service /etc/systemd/system/
 sudo cp deploy/systemd/furun-control-admin.service /etc/systemd/system/
 sudo systemctl daemon-reload
@@ -259,11 +265,32 @@ sudo systemctl enable furun-spot-executor.service
 sudo systemctl restart furun-spot-executor.service
 ```
 
-5. 重启前先核对角色与白名单参数：
+5. 在 repair 节点启用 `repair`：
+
+```bash
+sudo systemctl enable furun-spot-repair.service
+sudo systemctl restart furun-spot-repair.service
+```
+
+6. 验证 repair 运行状态：
+
+```bash
+sudo systemctl is-active furun-spot-repair.service
+sudo journalctl -u furun-spot-repair.service -n 50 --no-pager | grep '"event_type"'
+redis-cli XLEN stream:repair_tasks:main
+```
+
+验收点：
+
+- `furun-spot-repair.service` 返回 `active`
+- `journalctl` 中可见 repair 角色结构化事件
+- `stream:repair_tasks:<node_id>` 可作为 repair 输入流被观察
+
+7. 重启前先核对角色与白名单参数：
 
 ```bash
 cd /home/ubuntu/furunsystemv4/current
-grep -E '^(WORKER_ROLE|NODE_ID|USER_NODE_ROUTES|DISPATCH_SOURCE_STREAM|EXECUTOR_STREAM_KEY|SPOT_SYMBOLS|ORDERBOOK_DEPTH_LIMIT|TARGET_QUOTE_AMOUNT)=' .env.worker
+grep -E '^(WORKER_ROLE|NODE_ID|USER_NODE_ROUTES|DISPATCH_SOURCE_STREAM|EXECUTOR_STREAM_KEY|REPAIR_STREAM_KEY|SPOT_SYMBOLS|ORDERBOOK_DEPTH_LIMIT|TARGET_QUOTE_AMOUNT)=' .env.worker
 ```
 
 验收点：
@@ -273,6 +300,7 @@ grep -E '^(WORKER_ROLE|NODE_ID|USER_NODE_ROUTES|DISPATCH_SOURCE_STREAM|EXECUTOR_
 - `USER_NODE_ROUTES` 已覆盖需要绑定到执行节点的用户，例如 `42:node-a,99:main`
 - `DISPATCH_SOURCE_STREAM=stream:spot_opps`
 - `EXECUTOR_STREAM_KEY=stream:spot_exec_tasks:<node_id>`
+- `REPAIR_STREAM_KEY=stream:repair_tasks:<node_id>`
 - `SPOT_SYMBOLS=BTC/USDT,ETH/USDT,SOL/USDT`
 - `ORDERBOOK_DEPTH_LIMIT=5`
 - `TARGET_QUOTE_AMOUNT=100.0`
@@ -281,31 +309,36 @@ grep -E '^(WORKER_ROLE|NODE_ID|USER_NODE_ROUTES|DISPATCH_SOURCE_STREAM|EXECUTOR_
 - `CONTROL_ADMIN_PORT=8788`
 - `CONTROL_ADMIN_TOKEN` 已设置为非空 Bearer Token
 
-6. Validate runtime status, structured logs, and Redis progress:
+8. Validate runtime status, structured logs, and Redis progress:
 
 ```bash
 sudo systemctl is-active furun-spot-scanner.service
 sudo systemctl is-active furun-spot-dispatcher.service
 sudo systemctl is-active furun-spot-executor.service
+sudo systemctl is-active furun-spot-repair.service
 sudo systemctl is-active furun-control-admin.service
 sudo journalctl -u furun-spot-scanner.service -n 50 --no-pager | grep '"event_type"'
 sudo journalctl -u furun-spot-dispatcher.service -n 50 --no-pager | grep '"event_type"'
 sudo journalctl -u furun-spot-executor.service -n 50 --no-pager | grep '"event_type"'
+sudo journalctl -u furun-spot-repair.service -n 50 --no-pager | grep '"event_type"'
 sudo journalctl -u furun-control-admin.service -n 30 --no-pager | grep 'control.admin'
 redis-cli ZCARD arb:zset:spot
 redis-cli XLEN stream:spot_opps
 redis-cli XLEN stream:spot_exec_tasks:main
+redis-cli XLEN stream:repair_tasks:main
 redis-cli XREVRANGE stream:spot_exec_tasks:main + - COUNT 5
+redis-cli XREVRANGE stream:repair_tasks:main + - COUNT 5
 redis-cli XREVRANGE stream:spot_opps + - COUNT 10
 ```
 
 验收点：
 
-- `furun-spot-scanner.service`、`furun-spot-dispatcher.service`、`furun-spot-executor.service` 都返回 `active`
+- `furun-spot-scanner.service`、`furun-spot-dispatcher.service`、`furun-spot-executor.service`、`furun-spot-repair.service` 都返回 `active`
 - `furun-control-admin.service` 返回 `active`
 - `journalctl` 中可见单行 JSON 事件，至少包含 `event_type`、`level`、`service`、`message`
 - `redis-cli ZCARD arb:zset:spot` 与 `redis-cli XLEN stream:spot_opps` 均大于 0
 - `redis-cli XLEN stream:spot_exec_tasks:<node_id>` 大于 0，且最新 task entry 包含 `user_id` 与 `source_message_id`
+- `redis-cli XLEN stream:repair_tasks:<node_id>` 可观察到 repair 输入流长度，最新 entry 可用于核对 repair payload
 - 最新 `stream:spot_opps` entries 包含 `effective_buy_price`、`effective_sell_price`、`target_quote_amount`、`buy_depth_levels_used`、`sell_depth_levels_used`
 - 近期 scanner 活动或最新 Redis entries 中至少出现两个白名单 symbol，例如 `BTC/USDT` 与 `ETH/USDT`
 - 飞书成功通知文案为中文，且只会来自高于阈值的 `opportunity.detected`
@@ -1024,7 +1057,7 @@ sudo journalctl -u furun-spot-executor.service -n 50 --no-pager | grep 'control.
 - `payload.approved_notional`
 - `payload.reason`
 
-7. 远端联调 success 通知：
+9. 远端联调 success 通知：
 
 ```bash
 cd /home/ubuntu/furunsystemv4/current
@@ -1032,16 +1065,20 @@ chmod 600 .env.worker
 sudo systemctl restart furun-spot-scanner.service
 sudo systemctl restart furun-spot-dispatcher.service
 sudo systemctl restart furun-spot-executor.service
+sudo systemctl restart furun-spot-repair.service
 sudo systemctl restart furun-control-admin.service
 sleep 5
 sudo journalctl -u furun-spot-scanner.service -n 30 --no-pager | grep '"event_type"'
 sudo journalctl -u furun-spot-dispatcher.service -n 30 --no-pager | grep '"event_type"'
 sudo journalctl -u furun-spot-executor.service -n 30 --no-pager | grep '"event_type"'
+sudo journalctl -u furun-spot-repair.service -n 30 --no-pager | grep '"event_type"'
 sudo journalctl -u furun-control-admin.service -n 30 --no-pager | grep 'control.admin'
 redis-cli ZCARD arb:zset:spot
 redis-cli XLEN stream:spot_opps
 redis-cli XLEN stream:spot_exec_tasks:main
+redis-cli XLEN stream:repair_tasks:main
 redis-cli XREVRANGE stream:spot_exec_tasks:main + - COUNT 5
+redis-cli XREVRANGE stream:repair_tasks:main + - COUNT 5
 redis-cli XREVRANGE stream:spot_opps + - COUNT 10
 ```
 
@@ -1068,7 +1105,7 @@ redis-cli XREVRANGE stream:spot_opps + - COUNT 10
 - 恢复时建议先记录 `redis-cli ZCARD arb:zset:spot`、`redis-cli XLEN stream:spot_opps` 与 `redis-cli XLEN stream:spot_exec_tasks:<node_id>` 的当前值，再重启 `furun-spot-scanner.service`、`furun-spot-dispatcher.service` 与 `furun-spot-executor.service`，等待约 5 秒后再次读取并确认指标继续增长。
 - 验证日志时，除了确认两个服务都为 `active`，还要检查最近 50 行 scanner 日志中不再出现 `SpotOpportunity object has no attribute 'get'`。
 
-8. 人工制造 `CRITICAL` 路径并验证飞书 + QQ 邮件：
+10. 人工制造 `CRITICAL` 路径并验证飞书 + QQ 邮件：
 
 ```bash
 cd /home/ubuntu/furunsystemv4/current
@@ -1099,12 +1136,13 @@ sudo systemctl is-active furun-spot-scanner.service
 - `furun-spot-scanner.service` 由于配置了 `Restart=always`，故障演练期间可能仍短暂显示为 `active`；以 `journalctl` 中的 `worker.start_failed` JSON 为准
 - 恢复 `.env.worker` 后服务重新回到 `active`
 
-9. 单独重启某一侧服务时可使用：
+11. 单独重启某一侧服务时可使用：
 
 ```bash
 sudo systemctl restart furun-spot-scanner.service
 sudo systemctl restart furun-spot-dispatcher.service
 sudo systemctl restart furun-spot-executor.service
+sudo systemctl restart furun-spot-repair.service
 sudo systemctl restart furun-control-admin.service
 ```
 
