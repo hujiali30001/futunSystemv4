@@ -150,6 +150,140 @@ def test_mark_executing_sets_running_state_and_started_at():
     assert task.started_at is not None
 
 
+def test_claim_next_executable_task_claims_created_task_and_sets_running_fields():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = Session(engine)
+    session.add(User(id=42, username="u42"))
+    session.commit()
+
+    repository = TaskRepository(session)
+    repository.create_task(
+        ArbitrageTaskCreate(
+            task_uuid="arb-open-1",
+            user_id=42,
+            strategy_config_id=11,
+            opportunity_id="1-0",
+            env_mode="testnet",
+            task_type="open",
+            symbol="BTC/USDT",
+            spot_exchange="binance",
+            derivative_exchange="okx",
+            target_notional=100.0,
+            expected_spread_bps=25.0,
+            expected_funding_bps=5.0,
+            idempotency_key="42:1-0:open:11",
+            home_region="main",
+        )
+    )
+
+    claimed = repository.claim_next_executable_task(
+        worker_node_id="node-a",
+        env_mode="testnet",
+    )
+
+    assert claimed is not None
+    assert claimed.task_uuid == "arb-open-1"
+    assert claimed.status == "RUNNING"
+    assert claimed.worker_node_id == "node-a"
+    assert claimed.started_at is not None
+
+
+def test_claim_next_executable_task_does_not_return_same_task_twice():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = Session(engine)
+    session.add(User(id=42, username="u42"))
+    session.commit()
+
+    repository = TaskRepository(session)
+    repository.create_task(
+        ArbitrageTaskCreate(
+            task_uuid="arb-open-1",
+            user_id=42,
+            strategy_config_id=11,
+            opportunity_id="1-0",
+            env_mode="testnet",
+            task_type="open",
+            symbol="BTC/USDT",
+            spot_exchange="binance",
+            derivative_exchange="okx",
+            target_notional=100.0,
+            expected_spread_bps=25.0,
+            expected_funding_bps=5.0,
+            idempotency_key="42:1-0:open:11",
+            home_region="main",
+        )
+    )
+
+    first = repository.claim_next_executable_task(
+        worker_node_id="node-a",
+        env_mode="testnet",
+    )
+    second = repository.claim_next_executable_task(
+        worker_node_id="node-b",
+        env_mode="testnet",
+    )
+
+    assert first is not None
+    assert second is None
+
+
+def test_claim_next_executable_task_skips_running_and_terminal_states():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = Session(engine)
+    session.add(User(id=42, username="u42"))
+    session.commit()
+
+    repository = TaskRepository(session)
+    repository.create_task(
+        ArbitrageTaskCreate(
+            task_uuid="arb-succeeded",
+            user_id=42,
+            strategy_config_id=11,
+            opportunity_id="1-0",
+            env_mode="testnet",
+            task_type="open",
+            symbol="BTC/USDT",
+            spot_exchange="binance",
+            derivative_exchange="okx",
+            target_notional=100.0,
+            expected_spread_bps=25.0,
+            expected_funding_bps=5.0,
+            idempotency_key="42:1-0:open:11",
+            home_region="main",
+        )
+    )
+    repository.mark_succeeded("arb-succeeded")
+    repository.create_task(
+        ArbitrageTaskCreate(
+            task_uuid="arb-running",
+            user_id=42,
+            strategy_config_id=11,
+            opportunity_id="2-0",
+            env_mode="testnet",
+            task_type="open",
+            symbol="ETH/USDT",
+            spot_exchange="binance",
+            derivative_exchange="okx",
+            target_notional=80.0,
+            expected_spread_bps=10.0,
+            expected_funding_bps=1.0,
+            idempotency_key="42:2-0:open:11",
+            home_region="main",
+        )
+    )
+    repository.mark_executing("arb-running", worker_node_id="node-a")
+
+    claimed = repository.claim_next_executable_task(
+        worker_node_id="node-b",
+        env_mode="testnet",
+    )
+
+    assert claimed is None
+
+
 def test_task_repository_persists_bound_account_ids():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)

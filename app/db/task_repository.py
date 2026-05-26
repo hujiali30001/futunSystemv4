@@ -1,7 +1,7 @@
 from dataclasses import asdict, dataclass
 from datetime import datetime
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, select, update
 from sqlalchemy.orm import Session
 
 from models import ArbitrageTask
@@ -60,6 +60,42 @@ class TaskRepository:
                 .limit(limit)
             )
         )
+
+    def claim_next_executable_task(
+        self,
+        *,
+        worker_node_id: str,
+        env_mode: str,
+    ) -> ArbitrageTask | None:
+        claimed_at = datetime.utcnow()
+        candidate_id = (
+            select(ArbitrageTask.id)
+            .where(
+                ArbitrageTask.env_mode == env_mode,
+                ArbitrageTask.status.in_(("CREATED", "DISPATCHED")),
+            )
+            .order_by(ArbitrageTask.id.asc())
+            .limit(1)
+            .scalar_subquery()
+        )
+        claimed_id = self.session.execute(
+            update(ArbitrageTask)
+            .where(
+                ArbitrageTask.id == candidate_id,
+                ArbitrageTask.status.in_(("CREATED", "DISPATCHED")),
+            )
+            .values(
+                status="RUNNING",
+                worker_node_id=worker_node_id,
+                started_at=claimed_at,
+            )
+            .returning(ArbitrageTask.id)
+        ).scalar_one_or_none()
+        if claimed_id is None:
+            self.session.rollback()
+            return None
+        self.session.commit()
+        return self.session.get(ArbitrageTask, claimed_id)
 
     def find_closeable_task(
         self,
