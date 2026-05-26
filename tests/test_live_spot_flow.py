@@ -290,13 +290,13 @@ async def test_live_flow_closes_created_sessions_when_fetch_fails():
 def test_symbol_discovery_filters_usdt_spot_only():
     discovery = SymbolDiscovery.__new__(SymbolDiscovery)
     markets = {
-        "BTC/USDT": {"quote": "USDT", "active": True, "type": "spot", "base": "BTC"},
-        "ETH/USDT": {"quote": "USDT", "active": True, "type": "spot", "base": "ETH"},
-        "BTC/USDC": {"quote": "USDC", "active": True, "type": "spot", "base": "BTC"},
-        "SOL/USDT": {"quote": "USDT", "active": False, "type": "spot", "base": "SOL"},
-        "1000PEPE/USDT": {"quote": "USDT", "active": True, "type": "spot", "base": "1000PEPE"},
-        "1MSATS/USDT": {"quote": "USDT", "active": True, "type": "spot", "base": "1MSATS"},
-        "BTC/USDT:USDT": {"quote": "USDT", "active": True, "type": "swap", "base": "BTC"},
+        "BTC/USDT": {"quote": "USDT", "active": True, "type": "spot"},
+        "ETH/USDT": {"quote": "USDT", "active": True, "type": "spot"},
+        "BTC/USDC": {"quote": "USDC", "active": True, "type": "spot"},
+        "SOL/USDT": {"quote": "USDT", "active": False, "type": "spot"},
+        "1000PEPE/USDT": {"quote": "USDT", "active": True, "type": "spot"},
+        "1MBABYDOGE/USDT": {"quote": "USDT", "active": True, "type": "spot"},
+        "BTC/USDT:USDT": {"quote": "USDT", "active": True, "type": "swap"},
     }
     result = discovery._extract_spot_usdt_pairs(markets)
-    assert result == {"BTC/USDT", "ETH/USDT"}
+    assert result == {"BTC/USDT", "ETH/USDT", "1000PEPE/USDT", "1MBABYDOGE/USDT"}

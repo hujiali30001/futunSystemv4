@@ -1287,6 +1287,7 @@ class ContinuousSpotScanner:
         max_iterations: int | None = None,
         batch_concurrency: int = 15,
         batch_threshold: int = 10,
+        symbol_exchanges: dict[str, list[str]] | None = None,
     ) -> None:
         active_symbols = symbols or ([symbol] if symbol is not None else [])
         if len(active_symbols) >= batch_threshold:
@@ -1296,6 +1297,7 @@ class ContinuousSpotScanner:
                     exchanges=exchanges,
                     credentials_by_exchange=credentials_by_exchange,
                     symbols=active_symbols,
+                    symbol_exchanges=symbol_exchanges,
                     env_mode=env_mode,
                     proxies_by_exchange=proxies_by_exchange,
                     orderbook_depth_limit=orderbook_depth_limit,

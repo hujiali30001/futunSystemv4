@@ -13,7 +13,6 @@ from app.runtime.redis_flow import MarketOpportunityPublisher, RedisOpportunityD
 
 class SymbolDiscovery:
     _QUOTE_WHITELIST = frozenset({"USDT"})
-    _EXCLUDE_PREFIXES = ("1000", "1M")
 
     def __init__(self, session_factory: ExchangeClientFactory) -> None:
         self.session_factory = session_factory
@@ -25,9 +24,9 @@ class SymbolDiscovery:
         credentials_by_exchange: dict,
         env_mode: str = "testnet",
         proxies_by_exchange: dict[str, dict[str, str]] | None = None,
-        min_exchange_count: int = 3,
-    ) -> list[str]:
-        symbol_sets: list[set[str]] = []
+        min_exchange_count: int = 2,
+    ) -> dict[str, list[str]]:
+        symbol_to_exchanges: dict[str, set[str]] = {}
         for exchange in exchanges:
             session = self.session_factory.create_session(
                 exchange=exchange,
@@ -38,17 +37,19 @@ class SymbolDiscovery:
             try:
                 await session.mark_ready()
                 pairs = self._extract_spot_usdt_pairs(session.markets)
-                symbol_sets.append(pairs)
+                for symbol in pairs:
+                    if symbol not in symbol_to_exchanges:
+                        symbol_to_exchanges[symbol] = set()
+                    symbol_to_exchanges[symbol].add(exchange)
             finally:
                 await session.close()
 
-        counter: dict[str, int] = {}
-        for pairs in symbol_sets:
-            for symbol in pairs:
-                counter[symbol] = counter.get(symbol, 0) + 1
-
         threshold = max(min(min_exchange_count, len(exchanges)), 1)
-        return sorted(s for s, count in counter.items() if count >= threshold)
+        return {
+            sym: sorted(ex_list)
+            for sym, ex_list in sorted(symbol_to_exchanges.items())
+            if len(ex_list) >= threshold
+        }
 
     def _extract_spot_usdt_pairs(self, markets: dict) -> set[str]:
         pairs: set[str] = set()
@@ -58,9 +59,6 @@ class SymbolDiscovery:
             if not market.get("active", True):
                 continue
             if market.get("type") not in (None, "", "spot"):
-                continue
-            base = str(market.get("base", ""))
-            if base.startswith(self._EXCLUDE_PREFIXES):
                 continue
             pairs.add(symbol)
         return pairs
@@ -168,7 +166,8 @@ class LiveSpotFlowService:
         *,
         exchanges: list[str],
         credentials_by_exchange: dict,
-        symbols: list[str],
+        symbols: list[str] | None = None,
+        symbol_exchanges: dict[str, list[str]] | None = None,
         env_mode: str = "testnet",
         proxies_by_exchange: dict[str, dict[str, str]] | None = None,
         orderbook_depth_limit: int | None = None,
@@ -177,6 +176,14 @@ class LiveSpotFlowService:
     ) -> list[SpotOpportunity]:
         sessions: dict[str, ExchangeAccountSession] = {}
         adapters: dict[str, ExchangeAdapter] = {}
+        effective_map: dict[str, list[str]]
+        if symbol_exchanges is not None:
+            effective_map = symbol_exchanges
+        elif symbols is not None:
+            effective_map = {s: list(exchanges) for s in symbols}
+        else:
+            return []
+
         depth = orderbook_depth_limit or self.DEFAULT_ORDERBOOK_LIMIT
         quote = target_quote_amount or self.DEFAULT_TARGET_QUOTE_AMOUNT
         try:
@@ -195,11 +202,20 @@ class LiveSpotFlowService:
             results: list[SpotOpportunity] = []
 
             async def _scan_one(symbol: str) -> None:
+                ex_list = effective_map.get(symbol, list(exchanges))
+                if len(ex_list) < 2:
+                    return
                 async with sem:
-                    orderbooks = {
-                        ex: await adapters[ex].fetch_orderbook(symbol, limit=depth)
-                        for ex in exchanges
-                    }
+                    orderbooks: dict[str, dict] = {}
+                    for ex in ex_list:
+                        try:
+                            orderbooks[ex] = await adapters[ex].fetch_orderbook(
+                                symbol, limit=depth
+                            )
+                        except Exception:
+                            continue
+                    if len(orderbooks) < 2:
+                        return
                     snapshots = {
                         ex: OrderbookSnapshot(
                             best_bid=float(orderbooks[ex]["bids"][0][0]),
@@ -207,10 +223,16 @@ class LiveSpotFlowService:
                             bids=orderbooks[ex]["bids"],
                             asks=orderbooks[ex]["asks"],
                         )
-                        for ex in exchanges
+                        for ex in orderbooks
                     }
-                    buy_ex = min(exchanges, key=lambda n: snapshots[n].best_ask)
-                    sell_ex = max(exchanges, key=lambda n: snapshots[n].best_bid)
+                    buy_ex = min(snapshots, key=lambda n: snapshots[n].best_ask)
+                    sell_ex = max(snapshots, key=lambda n: snapshots[n].best_bid)
+                    if buy_ex == sell_ex:
+                        sell_ex = max(
+                            (ex for ex in snapshots if ex != buy_ex),
+                            key=lambda n: snapshots[n].best_bid,
+                            default=buy_ex,
+                        )
                     opportunity = self.calculator.build_depth_spot_opportunity(
                         symbol=symbol,
                         buy_exchange=buy_ex,
@@ -224,7 +246,7 @@ class LiveSpotFlowService:
                         results.append(opportunity)
 
             await asyncio.gather(
-                *[_scan_one(s) for s in symbols],
+                *[_scan_one(s) for s in effective_map],
                 return_exceptions=True,
             )
             return results
