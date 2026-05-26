@@ -60,7 +60,7 @@ def test_render_worker_env_example_contains_core_runtime_keys():
 
     assert "REDIS_URL=redis://127.0.0.1:6379/0" in content
     assert "SPOT_SYMBOL=BTC/USDT" in content
-    assert "SPOT_EXCHANGES=okx,bitget,gate" in content
+    assert "SPOT_EXCHANGES=okx,binance,bybit,bitget,gate" in content
     assert "OKX_API_KEY=" in content
     assert "OKX_PROXY_HOST=" in content
 
@@ -144,3 +144,14 @@ def test_requirements_include_postgres_driver():
     assert requirements.exists()
     content = requirements.read_text(encoding="utf-8")
     assert "psycopg2-binary" in content
+
+
+def test_render_worker_env_example_contains_binance_and_bybit_credentials():
+    content = render_worker_env_example()
+
+    assert "BINANCE_API_KEY=" in content
+    assert "BINANCE_SECRET=" in content
+    assert "BINANCE_PASSWORD=" in content
+    assert "BYBIT_API_KEY=" in content
+    assert "BYBIT_SECRET=" in content
+    assert "BYBIT_PASSWORD=" in content
