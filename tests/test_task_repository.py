@@ -63,6 +63,93 @@ def test_task_repository_creates_and_updates_task_status():
     assert refreshed.finished_at is not None
 
 
+def test_task_repository_lists_dispatchable_arbitrage_tasks_in_created_and_dispatched_states():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = Session(engine)
+    session.add(User(id=42, username="u42"))
+    session.commit()
+
+    repository = TaskRepository(session)
+    repository.create_task(
+        ArbitrageTaskCreate(
+            task_uuid="arb-open-1",
+            user_id=42,
+            strategy_config_id=11,
+            opportunity_id="1-0",
+            env_mode="testnet",
+            task_type="open",
+            symbol="BTC/USDT",
+            spot_exchange="binance",
+            derivative_exchange="okx",
+            target_notional=100.0,
+            expected_spread_bps=25.0,
+            expected_funding_bps=5.0,
+            idempotency_key="42:1-0:open:11",
+            home_region="main",
+        )
+    )
+    repository.mark_dispatched("arb-open-1", worker_node_id="node-a")
+    repository.create_task(
+        ArbitrageTaskCreate(
+            task_uuid="arb-close-1",
+            user_id=42,
+            strategy_config_id=11,
+            opportunity_id="2-0",
+            env_mode="testnet",
+            task_type="close",
+            symbol="ETH/USDT",
+            spot_exchange="binance",
+            derivative_exchange="okx",
+            target_notional=80.0,
+            expected_spread_bps=10.0,
+            expected_funding_bps=1.0,
+            idempotency_key="42:2-0:close:11",
+            home_region="main",
+        )
+    )
+    repository.mark_succeeded("arb-close-1")
+
+    items = repository.list_executable_tasks(env_mode="testnet", limit=10)
+
+    assert [item.task_uuid for item in items] == ["arb-open-1"]
+    assert items[0].status == "DISPATCHED"
+
+
+def test_mark_executing_sets_running_state_and_started_at():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = Session(engine)
+    session.add(User(id=42, username="u42"))
+    session.commit()
+
+    repository = TaskRepository(session)
+    repository.create_task(
+        ArbitrageTaskCreate(
+            task_uuid="arb-open-1",
+            user_id=42,
+            strategy_config_id=11,
+            opportunity_id="1-0",
+            env_mode="testnet",
+            task_type="open",
+            symbol="BTC/USDT",
+            spot_exchange="binance",
+            derivative_exchange="okx",
+            target_notional=100.0,
+            expected_spread_bps=25.0,
+            expected_funding_bps=5.0,
+            idempotency_key="42:1-0:open:11",
+            home_region="main",
+        )
+    )
+
+    task = repository.mark_executing("arb-open-1", worker_node_id="node-a")
+
+    assert task.status == "RUNNING"
+    assert task.worker_node_id == "node-a"
+    assert task.started_at is not None
+
+
 def test_task_repository_persists_bound_account_ids():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)

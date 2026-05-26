@@ -43,6 +43,24 @@ class TaskRepository:
             select(ArbitrageTask).where(ArbitrageTask.task_uuid == task_uuid)
         )
 
+    def list_executable_tasks(
+        self,
+        *,
+        env_mode: str,
+        limit: int = 100,
+    ) -> list[ArbitrageTask]:
+        return list(
+            self.session.scalars(
+                select(ArbitrageTask)
+                .where(
+                    ArbitrageTask.env_mode == env_mode,
+                    ArbitrageTask.status.in_(("CREATED", "DISPATCHED")),
+                )
+                .order_by(ArbitrageTask.id.asc())
+                .limit(limit)
+            )
+        )
+
     def find_closeable_task(
         self,
         *,
@@ -77,7 +95,7 @@ class TaskRepository:
 
     def mark_executing(self, task_uuid: str, *, worker_node_id: str) -> ArbitrageTask:
         task = self._require_task(task_uuid)
-        task.status = "EXECUTING"
+        task.status = "RUNNING"
         task.worker_node_id = worker_node_id
         task.started_at = datetime.utcnow()
         self.session.commit()
