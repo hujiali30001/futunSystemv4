@@ -158,7 +158,7 @@ class SandboxProbeService:
             amount=amount,
             price=price,
         )
-        if exchange in {"okx", "gate", "gateio"}:
+        if exchange in {"okx", "binance", "bybit", "bitget", "gate", "gateio"}:
             request.post_only = True
         return request
 
