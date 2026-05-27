@@ -56,3 +56,33 @@ def get_current_user(
             detail="Invalid token",
         )
     return {"user_id": user_id, "username": payload.get("username", "")}
+
+
+ADMIN_SECRET_KEY = os.getenv("ADMIN_JWT_SECRET_KEY", SECRET_KEY)
+
+
+def get_current_admin(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
+) -> dict:
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, ADMIN_SECRET_KEY, algorithms=[ALGORITHM])
+        admin_id: int = payload.get("admin_id")
+        if admin_id is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid admin token")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid admin token")
+    return {
+        "admin_id": admin_id,
+        "username": payload.get("username", ""),
+        "role": payload.get("role", ""),
+    }
+
+
+def require_role(*roles: str):
+    def checker(admin: dict = Depends(get_current_admin)) -> dict:
+        if admin["role"] not in roles:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+        return admin
+    return checker

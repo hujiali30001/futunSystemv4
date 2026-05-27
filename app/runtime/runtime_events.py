@@ -12,6 +12,7 @@ class RuntimeEvent:
     region: str | None = None
     symbol: str | None = None
     exchange: str | None = None
+    user_id: str | None = None
     exchanges: list[str] | None = None
     payload: dict = field(default_factory=dict)
     created_at: str = field(
@@ -27,6 +28,7 @@ class RuntimeEvent:
             "symbol": self.symbol,
             "exchange": self.exchange,
             "exchanges": self.exchanges,
+            "user_id": self.user_id,
             "message": self.message,
             "payload": self.payload,
             "created_at": self.created_at,

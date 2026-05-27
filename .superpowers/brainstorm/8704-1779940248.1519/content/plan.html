@@ -1,0 +1,76 @@
+<h2>实施路线：全都要 · 分三步</h2>
+<p class="subtitle">A → C → B，每步独立交付</p>
+
+<div class="section">
+  <h3>第一步 A：WebSocket 实时推送 + 持仓监控</h3>
+  <p>大约 2-3 页核心改动</p>
+  <ul>
+    <li>后端：FastAPI WebSocket endpoint，按方向推送 TOP 100 机会增量更新</li>
+    <li>前端：Leaderboard 改为 WS 连接，增量更新行而非全量刷新</li>
+    <li>新增：持仓监控页面 <code>/positions</code>，从 arbitrage_tasks 表读 HOLDING 状态任务</li>
+  </ul>
+</div>
+
+<div class="section">
+  <h3>第二步 C：管理后台</h3>
+  <p>管理员独立登录 + 可视化控制台</p>
+  <ul>
+    <li><code>admin_users</code> 表 + <code>/api/admin/login</code> + 管理后台登录页</li>
+    <li>额度规则管理页（CRUD risk_limit_rules）</li>
+    <li>平台开关管理页（停新仓 / 只减仓 / 交易所开关 / 币种开关）</li>
+    <li>公告管理页（发布、置顶、撤回、触达统计）</li>
+  </ul>
+</div>
+
+<div class="section">
+  <h3>第三步 B：多级阈值 + 趋势图</h3>
+  <p>前端补齐策略配置 + 可视化</p>
+  <ul>
+    <li>策略编辑页支持多级开仓/清仓梯度（已有 open_tiers_json）</li>
+    <li>收益走势图（Recharts 折线图，从 arbitrage_tasks CLOSED 状态拉数据）</li>
+    <li>排行榜币种迷你价格走势（最近 24h ticker 聚合）</li>
+  </ul>
+</div>
+
+<hr style="border-color:#333;margin:2rem 0">
+
+<h3>管理员独立登录 — 确认细节</h3>
+
+<div class="options">
+  <div class="option" data-choice="admin-simple" onclick="toggleSelect(this)">
+    <div class="letter">S</div>
+    <div class="content">
+      <h3>简洁方案</h3>
+      <p>admin_users 表只有 username + password_hash + role，角色分：superadmin / risk_admin / ops_admin。登录用独立 endpoint，JWT 包含 role，前端管理页面校验 role</p>
+    </div>
+  </div>
+  <div class="option" data-choice="admin-full" onclick="toggleSelect(this)">
+    <div class="letter">F</div>
+    <div class="content">
+      <h3>完整方案</h3>
+      <p>上述 + admin_action_logs 审计表，所有管理操作落库。管理后台新增操作日志查询页。管理员可查看自己的操作历史</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>还有一个关键决策：</h3>
+  <p>现有的 control_admin_service (aiohttp :8788) 是否保留？还是合并到 FastAPI 里统一管理？</p>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="merge-api" onclick="toggleSelect(this)">
+    <div class="letter">M</div>
+    <div class="content">
+      <h3>合并到 FastAPI</h3>
+      <p>把 :8787/:8788 的 API 挪到 FastAPI 下 /api/admin/... ，一个端口统一管理，前端不用多端口</p>
+    </div>
+  </div>
+  <div class="option" data-choice="keep-api" onclick="toggleSelect(this)">
+    <div class="letter">K</div>
+    <div class="content">
+      <h3>保留独立服务</h3>
+      <p>不合并，管理后台前端直接调 :8788，用户端继续调 :8000</p>
+    </div>
+  </div>
+</div>

@@ -37,6 +37,8 @@ class User(TimestampMixin, Base):
     risk_level: Mapped[str] = mapped_column(String(32), default="standard")
     home_region: Mapped[str] = mapped_column(String(32), default="default")
     is_trading_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    feishu_webhook_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class Proxy(TimestampMixin, Base):
@@ -174,3 +176,28 @@ class Announcement(TimestampMixin, Base):
     channels_json: Mapped[list] = mapped_column(JSON, default=list)
     requires_ack: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[str] = mapped_column(String(32), default="draft")
+
+
+class AdminUser(TimestampMixin, Base):
+    __tablename__ = "admin_users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    role: Mapped[str] = mapped_column(String(32), default="ops_admin")
+
+
+class AdminActionLog(TimestampMixin, Base):
+    __tablename__ = "admin_action_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    admin_user_id: Mapped[int] = mapped_column(ForeignKey("admin_users.id"), index=True)
+    action_type: Mapped[str] = mapped_column(String(64))
+    target_type: Mapped[str] = mapped_column(String(64))
+    target_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    before_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    after_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    admin_user: Mapped["AdminUser"] = relationship()

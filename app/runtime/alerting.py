@@ -219,6 +219,9 @@ class AlertRouter:
         self.logger.record(event)
         if not self.alerts_enabled:
             return
+        if event.user_id is not None:
+            await self._send_user_notifications(event)
+            return
         if event.level == "CRITICAL":
             await self._send_feishu(event)
             await self._send_email(event)
@@ -256,3 +259,26 @@ class AlertRouter:
     async def _send_email(self, event: RuntimeEvent) -> None:
         if self.email_enabled and self.email_notifier is not None:
             await self.email_notifier.send(event)
+
+    async def _send_user_notifications(self, event: RuntimeEvent) -> None:
+        from models import User
+        from app.db.session import SessionLocal
+        db = SessionLocal()
+        try:
+            user = db.query(User).filter(User.id == int(event.user_id)).first()
+            if user is None:
+                return
+            if user.feishu_webhook_url:
+                notifier = FeishuNotifier(webhook_url=user.feishu_webhook_url)
+                await notifier.send(event)
+            if user.email:
+                notifier = EmailNotifier(
+                    smtp_host=self.email_notifier.smtp_host,
+                    smtp_port=self.email_notifier.smtp_port,
+                    username=self.email_notifier.username,
+                    password=self.email_notifier.password,
+                    recipients=[user.email],
+                )
+                await notifier.send(event)
+        finally:
+            db.close()

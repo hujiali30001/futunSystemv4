@@ -22,12 +22,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from app.api import auth, opportunities, strategies, tasks  # noqa: E402,F401
+from app.api import auth, opportunities, positions, settings, strategies, tasks  # noqa: E402,F401
+from app.api import admin  # noqa: E402
 
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(opportunities.router, prefix="/api/opportunities", tags=["opportunities"])
+app.include_router(positions.router, prefix="/api", tags=["positions"])
+app.include_router(settings.router, prefix="/api", tags=["settings"])
 app.include_router(strategies.router, prefix="/api/strategies", tags=["strategies"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"])
+app.include_router(admin.router, prefix="/api")
 
 _web_dir = Path(__file__).resolve().parent.parent.parent / "web" / "dist"
 if _web_dir.exists() and _web_dir.is_dir():

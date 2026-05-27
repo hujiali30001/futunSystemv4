@@ -39,6 +39,8 @@ export function Header() {
                 <Link to="/tasks" className="hover:text-white">
                   任务
                 </Link>
+                <Link to="/positions" className="hover:text-white">持仓</Link>
+                <Link to="/settings" className="hover:text-white">设置</Link>
               </>
             )}
           </nav>

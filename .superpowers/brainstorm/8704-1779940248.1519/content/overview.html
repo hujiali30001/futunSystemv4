@@ -1,0 +1,88 @@
+<h2>前端 & 管理功能现状 → 下一步</h2>
+<p class="subtitle">已有 5 个页面 · 待做各项集中在 B/C 阶段</p>
+
+<div class="section">
+  <h3>✅ 已完成</h3>
+  <div class="pros-cons">
+    <div class="pros">
+      <h4>用户端</h4>
+      <ul>
+        <li>登录/注册 (LoginPage, RegisterPage)</li>
+        <li>排行榜 (LeaderboardPage) — 实时刷新、筛选、搜索、置顶</li>
+        <li>策略管理 (StrategiesPage) — CRUD + 开关</li>
+        <li>任务列表 (TasksPage)</li>
+      </ul>
+    </div>
+    <div class="pros">
+      <h4>管理员端</h4>
+      <ul>
+        <li>控制面板 HTTP API (:8788) — 额度规则、开关、公告 CRUD</li>
+        <li>路由管理 HTTP API (:8787)</li>
+        <li>告警：飞书 + 邮件</li>
+        <li>审计事件：RuntimeEvent 日志</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<h3>请选择你最先想做的方向：</h3>
+
+<div class="options">
+  <div class="option" data-choice="frontend-ws" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>前端体验 — WebSocket 实时推送</h3>
+      <p>排行榜不再轮询，用 WS 推送新机会，延迟降到秒级。同时加持仓监控页面（当前持仓、盈亏、保证金率）</p>
+    </div>
+  </div>
+  <div class="option" data-choice="frontend-tiers" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>前端体验 — 多级开清仓 + 趋势图</h3>
+      <p>open_tiers_json 已建字段，前端做梯度配置 UI。加收益走势图（Recharts），币种价格迷你图</p>
+    </div>
+  </div>
+  <div class="option" data-choice="admin" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>管理后台 — Web 可视化控制台</h3>
+      <p>现有 HTTP API 只有命令行可用。搭建管理后台页面：额度规则管理、平台开关控制、公告发布与触达跟踪</p>
+    </div>
+  </div>
+  <div class="option" data-choice="all" onclick="toggleSelect(this)">
+    <div class="letter">D</div>
+    <div class="content">
+      <h3>全都要 — 分步推进</h3>
+      <p>按 A → C → B 的顺序全部实现。先做实时推送让排行榜有竞争力，再做管理后台，最后补趋势图</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>补充问题：</h3>
+  <p>已有的管理员 HTTP API (:8787, :8788) 需要 Bearer Token。目前 Token 在环境变量里配的。你希望：</p>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="admin-login" onclick="toggleSelect(this)">
+    <div class="letter">1</div>
+    <div class="content">
+      <h3>管理员单独登录</h3>
+      <p>加 admin_users 表 + admin 登录页，管理员用独立账号密码登录</p>
+    </div>
+  </div>
+  <div class="option" data-choice="role-based" onclick="toggleSelect(this)">
+    <div class="letter">2</div>
+    <div class="content">
+      <h3>角色标注</h3>
+      <p>在现有 users 表加 is_admin 字段，登录后根据角色显示管理入口</p>
+    </div>
+  </div>
+  <div class="option" data-choice="env-only" onclick="toggleSelect(this)">
+    <div class="letter">3</div>
+    <div class="content">
+      <h3>暂不改动</h3>
+      <p>管理功能先通过 API + Token 调试，后续再加前端管理页面</p>
+    </div>
+  </div>
+</div>

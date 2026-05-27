@@ -162,3 +162,221 @@ export async function getTasks(params: { page?: number; page_size?: number }) {
   const { data } = await api.get<TaskPageData>('/tasks', { params })
   return data
 }
+
+export interface RiskLimitRule {
+  id: number
+  scope_type: string
+  scope_id: string
+  limit_type: string
+  limit_value: number
+  enabled: boolean
+  priority: number
+  user_id?: number
+}
+
+export interface PlatformSwitch {
+  switch_key: string
+  scope_type: string
+  scope_id: string
+  enabled: boolean
+}
+
+export interface Announcement {
+  id: number
+  title: string
+  content: string
+  status: string
+  is_pinned: boolean
+  created_at?: string
+  updated_at?: string
+}
+
+export interface AuditLogItem {
+  id: number
+  admin_user_id: number
+  action_type: string
+  target_type: string
+  target_id: string
+  before_json: any
+  after_json: any
+  created_at?: string
+}
+
+export async function getLimits() {
+  const { data } = await api.get<{ limits: RiskLimitRule[] }>('/admin/limits')
+  return data
+}
+
+export async function createLimit(body: {
+  scope_type: string
+  scope_id: string
+  limit_type: string
+  limit_value: number
+}) {
+  const { data } = await api.post<RiskLimitRule>('/admin/limits', body)
+  return data
+}
+
+export async function updateLimit(
+  id: number,
+  body: Partial<{
+    enabled: boolean
+    limit_value: number
+    priority: number
+  }>,
+) {
+  const { data } = await api.put<RiskLimitRule>(`/admin/limits/${id}`, body)
+  return data
+}
+
+export async function deleteLimit(id: number) {
+  await api.delete(`/admin/limits/${id}`)
+}
+
+export async function getSwitches() {
+  const { data } = await api.get<{ switches: PlatformSwitch[] }>('/admin/switches')
+  return data
+}
+
+export async function putSwitch(switch_id: string, enabled: boolean) {
+  const { data } = await api.put<PlatformSwitch>(`/admin/switches/${switch_id}`, { enabled })
+  return data
+}
+
+export async function deleteSwitch(switch_id: string) {
+  await api.delete(`/admin/switches/${switch_id}`)
+}
+
+export async function getAnnouncements() {
+  const { data } = await api.get<{ announcements: Announcement[] }>('/admin/announcements')
+  return data
+}
+
+export async function createAnnouncement(body: {
+  title: string
+  content: string
+  status: string
+}) {
+  const { data } = await api.post<Announcement>('/admin/announcements', body)
+  return data
+}
+
+export async function updateAnnouncement(
+  id: number,
+  body: Partial<{
+    title: string
+    content: string
+    status: string
+    is_pinned: boolean
+  }>,
+) {
+  const { data } = await api.put<Announcement>(`/admin/announcements/${id}`, body)
+  return data
+}
+
+export async function deleteAnnouncement(id: number) {
+  await api.delete(`/admin/announcements/${id}`)
+}
+
+export async function getAudit(params: { page_size?: number }) {
+  const { data } = await api.get<{ items: AuditLogItem[] }>('/admin/audit', { params })
+  return data
+}
+
+export async function getAdminUsers(params: { page_size?: number }) {
+  const { data } = await api.get<{ items: UserInfo[] }>('/admin/users', { params })
+  return data
+}
+
+export interface AdminLoginResponse {
+  access_token: string
+  role: string
+}
+
+export interface AdminMeResponse {
+  id: number
+  username: string
+  role: string
+}
+
+export async function adminLogin(username: string, password: string) {
+  const { data } = await api.post<AdminLoginResponse>('/admin/auth/login', { username, password })
+  return data
+}
+
+export async function getAdminMe() {
+  const { data } = await api.get<AdminMeResponse>('/admin/auth/me')
+  return data
+}
+
+export interface PositionItem {
+  task_uuid: string
+  symbol: string
+  spot_exchange: string
+  derivative_exchange: string
+  task_type: string
+  target_notional: number
+  expected_spread_bps: number
+  status: string
+  auto_recovery_status: string
+}
+
+export interface PositionPageData {
+  items: PositionItem[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export async function getPositions(params: { page?: number; page_size?: number }) {
+  const { data } = await api.get<PositionPageData>('/positions', { params })
+  return data
+}
+
+export interface ExchangeAccount {
+  id: number
+  exchange: string
+  api_key: string
+  account_label: string
+}
+
+export interface UserSettings {
+  email: string | null
+  feishu_webhook_url: string | null
+  exchange_accounts: ExchangeAccount[]
+}
+
+export async function getSettings() {
+  const { data } = await api.get<UserSettings>('/settings')
+  return data
+}
+
+export async function updateProfile(body: {
+  email: string | null
+  feishu_webhook_url: string | null
+}) {
+  const { data } = await api.patch<UserSettings>('/settings/profile', body)
+  return data
+}
+
+export async function createExchangeAccount(body: {
+  exchange: string
+  api_key: string
+  secret: string
+  passphrase?: string
+}) {
+  const { data } = await api.post<ExchangeAccount>('/settings/exchange-accounts', body)
+  return data
+}
+
+export async function updateExchangeAccount(
+  id: number,
+  body: { api_key: string; secret: string; passphrase?: string },
+) {
+  const { data } = await api.put<ExchangeAccount>(`/settings/exchange-accounts/${id}`, body)
+  return data
+}
+
+export async function deleteExchangeAccount(id: number) {
+  await api.delete(`/settings/exchange-accounts/${id}`)
+}
