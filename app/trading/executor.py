@@ -10,6 +10,7 @@ class ExecutionResult:
     status: str
     filled_exchanges: list[str]
     failed_exchanges: list[str]
+    failed_errors: list[str] | None = None
 
 
 class TradeExecutor:
@@ -37,5 +38,6 @@ class TradeExecutor:
         responses = await asyncio.gather(*coroutines, return_exceptions=True)
         filled = [exchange for exchange, result in zip(exchanges, responses) if not isinstance(result, Exception)]
         failed = [exchange for exchange, result in zip(exchanges, responses) if isinstance(result, Exception)]
+        failed_errors = [f"{exchange}: {result}" for exchange, result in zip(exchanges, responses) if isinstance(result, Exception)] or None
         status = "OPEN_HEDGED" if not failed else "OPEN_PARTIAL"
-        return ExecutionResult(status=status, filled_exchanges=filled, failed_exchanges=failed)
+        return ExecutionResult(status=status, filled_exchanges=filled, failed_exchanges=failed, failed_errors=failed_errors)

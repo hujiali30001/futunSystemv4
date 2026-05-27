@@ -284,6 +284,9 @@ def _build_arb_executor_execution_result_event(
             "execution_status": getattr(result, "execution_status", None),
             "filled_exchanges": list(getattr(result, "filled_exchanges", []) or []),
             "failed_exchanges": list(getattr(result, "failed_exchanges", []) or []),
+            "failed_errors": [
+                str(e) for e in (getattr(result, "failed_errors", None) or [])
+            ],
         },
     )
 
@@ -1205,6 +1208,7 @@ class ArbitrageExecutionTaskConsumer:
                 self.event_router is not None
                 and getattr(result, "execution_status", None) is not None
             ):
+                failed_errors = getattr(result, "failed_errors", None) or []
                 await self.event_router.dispatch(
                     _build_arb_executor_execution_result_event(
                         region=self.region,

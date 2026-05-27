@@ -16,6 +16,7 @@ class RuntimeExecutionResult:
     filled_exchanges: list[str]
     failed_exchanges: list[str]
     reason: str | None = None
+    failed_errors: list[str] | None = None
 
 
 class RuntimeTradeExecutionService:
@@ -138,6 +139,7 @@ class RuntimeTradeExecutionService:
                 execution_status=result.status,
                 filled_exchanges=list(result.filled_exchanges),
                 failed_exchanges=list(result.failed_exchanges),
+                failed_errors=list(getattr(result, "failed_errors", None) or []) or None,
             )
         finally:
             for adapter in adapters.values():
