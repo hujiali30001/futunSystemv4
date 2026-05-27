@@ -49,11 +49,8 @@ class ExchangeAdapter:
     async def fetch_usdt_balance(self) -> float:
         try:
             raw = await self.fetch_balance()
-            total = raw.get("total", {}) if isinstance(raw, dict) else {}
-            usdt_info = raw.get("USDT", {}) if isinstance(raw, dict) else {}
-            free = usdt_info.get("free", 0) if isinstance(usdt_info, dict) else 0
-            usdt = float(free) if float(free or 0) > 0 else float(total.get("USDT", 0) or 0)
-            return usdt
+            free_balance = raw.get("free", {}) if isinstance(raw, dict) else {}
+            return float(free_balance.get("USDT", 0) or 0)
         except Exception:
             return 0.0
 
