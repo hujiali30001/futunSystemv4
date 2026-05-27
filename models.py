@@ -32,6 +32,7 @@ class User(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     username: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="active")
     risk_level: Mapped[str] = mapped_column(String(32), default="standard")
     home_region: Mapped[str] = mapped_column(String(32), default="default")
@@ -96,6 +97,8 @@ class StrategyConfig(TimestampMixin, Base):
     target_quote_amount: Mapped[float] = mapped_column(Float, default=100.0)
     open_spread_bps_threshold: Mapped[float] = mapped_column(Float, default=0.0)
     close_spread_bps_threshold: Mapped[float] = mapped_column(Float, default=0.0)
+    open_tiers_json: Mapped[list] = mapped_column(JSON, default=list)
+    close_tiers_json: Mapped[list] = mapped_column(JSON, default=list)
     max_single_task_notional: Mapped[float] = mapped_column(Float, default=100.0)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
