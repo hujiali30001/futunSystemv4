@@ -28,6 +28,7 @@ export function LeaderboardPage() {
   const [search, setSearch] = useState('')
   const [minVolume, setMinVolume] = useState('')
   const [minFunding, setMinFunding] = useState('')
+  const [fundingOp, setFundingOp] = useState<'gte' | 'lte'>('gte')
   const [pinned, setPinned] = useState<Set<string>>(new Set())
   const pageSize = 20
   const navigate = useNavigate()
@@ -62,9 +63,15 @@ export function LeaderboardPage() {
     if (minFunding) {
       const threshold = parseFloat(minFunding)
       if (!isNaN(threshold)) {
-        list = list.filter(
-          (r) => Math.abs(parseFundingRate(r.funding_rate_display)) >= threshold,
-        )
+        if (fundingOp === 'gte') {
+          list = list.filter(
+            (r) => parseFundingRate(r.funding_rate_display) >= threshold,
+          )
+        } else {
+          list = list.filter(
+            (r) => parseFundingRate(r.funding_rate_display) <= threshold,
+          )
+        }
       }
     }
     const pinnedList = list.filter((r) => pinned.has(pinKey(r)))
@@ -172,11 +179,19 @@ export function LeaderboardPage() {
           placeholder="24h交易额 ≥"
           className="rounded bg-gray-800 border border-gray-700 px-3 py-1.5 text-gray-300 placeholder-gray-600 w-32"
         />
+        <select
+          value={fundingOp}
+          onChange={(e) => setFundingOp(e.target.value as 'gte' | 'lte')}
+          className="rounded bg-gray-800 border border-gray-700 px-2 py-1.5 text-gray-300"
+        >
+          <option value="gte">≥</option>
+          <option value="lte">≤</option>
+        </select>
         <input
           value={minFunding}
           onChange={(e) => setMinFunding(e.target.value)}
-          placeholder="费率绝对值 ≥ %"
-          className="rounded bg-gray-800 border border-gray-700 px-3 py-1.5 text-gray-300 placeholder-gray-600 w-36"
+          placeholder="费率阈值 %"
+          className="rounded bg-gray-800 border border-gray-700 px-3 py-1.5 text-gray-300 placeholder-gray-600 w-32"
         />
         {pinned.size > 0 && (
           <button
