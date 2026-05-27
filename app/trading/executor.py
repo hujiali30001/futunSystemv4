@@ -31,6 +31,7 @@ class TradeExecutor:
                         order_type=leg.order_type,
                         amount=leg.amount,
                         price=leg.price,
+                        market_type=getattr(leg, "market_type", "spot"),
                     )
                 )
             )

@@ -35,6 +35,8 @@ class RuntimeTradeExecutionService:
         target_quote_amount: float = 15.0,
         env_mode: str = "testnet",
         proxies_by_exchange: dict[str, dict[str, str]] | None = None,
+        buy_market_type: str = "spot",
+        sell_market_type: str = "swap",
     ) -> RuntimeExecutionResult:
         _ = execution_accounts_by_exchange
         unique_exchanges = list(dict.fromkeys(exchanges))
@@ -88,8 +90,8 @@ class RuntimeTradeExecutionService:
                 float(tickers[selected_sell_exchange]["ask"]) * 1.05,
             )
 
-            buy_usdt = await adapters[selected_buy_exchange].fetch_usdt_balance()
-            sell_usdt = await adapters[selected_sell_exchange].fetch_usdt_balance()
+            buy_usdt = await adapters[selected_buy_exchange].fetch_usdt_balance(buy_market_type)
+            sell_usdt = await adapters[selected_sell_exchange].fetch_usdt_balance(sell_market_type)
             if selected_buy_exchange == selected_sell_exchange:
                 min_required = target_quote_amount * 2
                 if buy_usdt < min_required:
@@ -122,6 +124,7 @@ class RuntimeTradeExecutionService:
                         order_type="limit",
                         amount=float(buy_amount),
                         price=float(buy_price),
+                        market_type=buy_market_type,
                     ),
                     ExecutionLeg(
                         exchange=selected_sell_exchange,
@@ -129,6 +132,7 @@ class RuntimeTradeExecutionService:
                         order_type="limit",
                         amount=float(sell_amount),
                         price=float(sell_price),
+                        market_type=sell_market_type,
                     ),
                 ],
             )

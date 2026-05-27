@@ -26,9 +26,13 @@ class ArbitrageExecutionAdapter:
         if task_type == "open":
             buy_exchange = str(task.spot_exchange)
             sell_exchange = str(task.derivative_exchange)
+            buy_market_type = "spot"
+            sell_market_type = "swap"
         elif task_type == "close":
             buy_exchange = str(task.derivative_exchange)
             sell_exchange = str(task.spot_exchange)
+            buy_market_type = "swap"
+            sell_market_type = "spot"
         else:
             raise ValueError(f"unsupported task_type: {task.task_type}")
 
@@ -42,4 +46,6 @@ class ArbitrageExecutionAdapter:
             target_quote_amount=float(task.target_notional),
             env_mode=env_mode,
             proxies_by_exchange=proxies_by_exchange,
+            buy_market_type=buy_market_type,
+            sell_market_type=sell_market_type,
         )

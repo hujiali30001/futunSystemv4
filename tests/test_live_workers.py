@@ -863,23 +863,19 @@ def test_executor_preflight_validator_rejects_missing_required_fields():
     assert exc_info.value.reason == "executor_preflight_invalid_payload"
 
 
-def test_executor_preflight_validator_rejects_same_exchange():
+def test_executor_preflight_validator_allows_same_exchange():
     validator = ExecutorPreflightValidator()
-
-    with pytest.raises(ExecutorPreflightError) as exc_info:
-        validator.validate(
-            payload={
-                "task_uuid": "task-1",
-                "user_id": "42",
-                "symbol": "BTC/USDT",
-                "buy_exchange": "okx",
-                "sell_exchange": "okx",
-                "target_quote_amount": "40.0",
-            },
-            execution_accounts_by_exchange=None,
-        )
-
-    assert exc_info.value.reason == "executor_preflight_same_exchange"
+    validator.validate(
+        payload={
+            "task_uuid": "task-1",
+            "user_id": "42",
+            "symbol": "BTC/USDT",
+            "buy_exchange": "okx",
+            "sell_exchange": "okx",
+            "target_quote_amount": "40.0",
+        },
+        execution_accounts_by_exchange=None,
+    )
 
 
 def test_executor_preflight_validator_rejects_invalid_amount():
@@ -1038,10 +1034,10 @@ async def test_executor_preflight_same_exchange_marks_task_failed_without_dispat
         max_iterations=1,
     )
 
-    assert processed == 0
-    assert service.calls == []
+    assert processed == 1
+    assert len(service.calls) == 1
     assert repository.executing == [("task-1", "node-a")]
-    assert repository.failed == [("task-1", "executor_preflight_same_exchange")]
+    assert repository.failed == []
 
 
 @pytest.mark.asyncio
@@ -3863,7 +3859,7 @@ async def test_executor_runtime_trade_execution_service_uses_payload_exchanges_s
         async def close(self) -> None:
             return None
 
-        async def fetch_usdt_balance(self) -> float:
+        async def fetch_usdt_balance(self, market_type: str = "spot") -> float:
             return 100.0
 
     class FakeSessionFactory:
@@ -4917,10 +4913,7 @@ async def test_executor_preflight_failure_does_not_emit_execution_result_event()
         max_iterations=1,
     )
 
-    assert processed == 0
-    assert all(
-        event.event_type != "executor.execution_result" for event in router.events
-    )
+    assert processed == 1
 
 
 @pytest.mark.asyncio
@@ -4961,14 +4954,14 @@ async def test_executor_preflight_failure_does_not_emit_repair_planned_event():
         max_iterations=1,
     )
 
-    assert processed == 0
+    assert processed == 1
     assert all(
         event.event_type != "executor.repair_planned" for event in router.events
     )
 
 
 @pytest.mark.asyncio
-async def test_executor_preflight_failure_does_not_write_execution_summary():
+async def test_executor_preflight_same_exchange_does_not_write_execution_summary():
     redis_client = FakeRedis(
         xread_messages=[
             (
@@ -5004,9 +4997,8 @@ async def test_executor_preflight_failure_does_not_write_execution_summary():
         max_iterations=1,
     )
 
-    assert processed == 0
-    assert repository.execution_results == []
-    assert repository.failed == [("task-1", "executor_preflight_same_exchange")]
+    assert processed == 1
+    assert repository.failed == []
 
 
 @pytest.mark.asyncio

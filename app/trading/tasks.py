@@ -8,6 +8,7 @@ class ExecutionLeg:
     order_type: str
     amount: float
     price: float | None = None
+    market_type: str = "spot"
 
 
 @dataclass(slots=True)

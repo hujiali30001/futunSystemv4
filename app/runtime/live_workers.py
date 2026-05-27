@@ -779,11 +779,6 @@ class ExecutorPreflightValidator:
 
         buy_exchange = str(payload["buy_exchange"])
         sell_exchange = str(payload["sell_exchange"])
-        if buy_exchange == sell_exchange:
-            raise ExecutorPreflightError(
-                "executor_preflight_same_exchange",
-                "buy_exchange and sell_exchange must differ",
-            )
 
         try:
             target_quote_amount = float(payload.get("target_quote_amount", "0"))

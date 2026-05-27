@@ -12,6 +12,7 @@ class OrderRequest:
     price: float | None = None
     reduce_only: bool = False
     post_only: bool = False
+    market_type: str = "spot"
 
 
 class ExchangeAdapter:
@@ -21,18 +22,26 @@ class ExchangeAdapter:
     async def create_order(self, request: OrderRequest) -> dict:
         if self.session.client is not None and hasattr(self.session.client, "create_order"):
             params: dict = {}
-            if request.reduce_only:
-                params["reduceOnly"] = True
-            if request.post_only:
-                params["postOnly"] = True
-            return await self.session.client.create_order(
-                request.symbol,
-                request.order_type,
-                request.side,
-                request.amount,
-                request.price,
-                params,
-            )
+            client = self.session.client
+            saved_default_type = client.options.get("defaultType", "spot") if hasattr(client, "options") else "spot"
+            try:
+                if hasattr(client, "options") and request.market_type in ("spot", "swap", "future", "margin"):
+                    client.options["defaultType"] = request.market_type
+                if request.reduce_only:
+                    params["reduceOnly"] = True
+                if request.post_only:
+                    params["postOnly"] = True
+                return await client.create_order(
+                    request.symbol,
+                    request.order_type,
+                    request.side,
+                    request.amount,
+                    request.price,
+                    params,
+                )
+            finally:
+                if hasattr(client, "options"):
+                    client.options["defaultType"] = saved_default_type
         return {
             "id": "simulated-order",
             "symbol": request.symbol,
@@ -46,8 +55,11 @@ class ExchangeAdapter:
             return await self.session.client.fetch_balance()
         return {"total": {}}
 
-    async def fetch_usdt_balance(self) -> float:
+    async def fetch_usdt_balance(self, market_type: str = "spot") -> float:
         try:
+            client = self.session.client
+            if client is not None and hasattr(client, "options") and market_type:
+                client.options["defaultType"] = market_type
             raw = await self.fetch_balance()
             free_balance = raw.get("free", {}) if isinstance(raw, dict) else {}
             return float(free_balance.get("USDT", 0) or 0)
