@@ -47,12 +47,19 @@ class ExchangeAdapter:
         return {"total": {}}
 
     async def fetch_usdt_balance(self) -> float:
+        exchange_name = getattr(self.session, "exchange", "unknown")
         try:
             raw = await self.fetch_balance()
             total = raw.get("total", {}) if isinstance(raw, dict) else {}
             usdt = total.get("USDT", 0)
-            return float(usdt or 0)
-        except Exception:
+            result = float(usdt or 0)
+            if result > 0:
+                import sys
+                print(f"[balance_ok] {exchange_name} USDT={result}", file=sys.stderr, flush=True)
+            return result
+        except Exception as exc:
+            import sys
+            print(f"[balance_err] {exchange_name}: {exc}", file=sys.stderr, flush=True)
             return 0.0
 
     async def fetch_ticker(self, symbol: str) -> dict:
