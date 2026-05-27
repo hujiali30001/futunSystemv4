@@ -19,8 +19,6 @@ function parseFundingRate(v: string): number {
 
 export function LeaderboardPage() {
   const [rows, setRows] = useState<LeaderboardRow[]>([])
-  const [page, setPage] = useState(1)
-  const [total, setTotal] = useState(0)
   const [direction, setDirection] = useState<Direction>('spot_futures')
   const [loading, setLoading] = useState(true)
   const [autoRefresh, setAutoRefresh] = useState(true)
@@ -30,9 +28,9 @@ export function LeaderboardPage() {
   const [minFunding, setMinFunding] = useState('')
   const [fundingOp, setFundingOp] = useState<'gte' | 'lte'>('gte')
   const [pinned, setPinned] = useState<Set<string>>(new Set())
+  const [page, setPage] = useState(1)
   const [jumpPage, setJumpPage] = useState('')
-  const hasFilter = search.trim() !== '' || minVolume !== '' || minFunding !== ''
-  const pageSize = hasFilter ? 200 : 20
+  const displayPageSize = 15
   const navigate = useNavigate()
   const token = localStorage.getItem('token')
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -85,19 +83,25 @@ export function LeaderboardPage() {
     return [...pinnedList, ...rest]
   })()
 
+  const filteredTotal = filtered.length
+  const totalPages = Math.ceil(filteredTotal / displayPageSize)
+  const pageItems = filtered.slice(
+    (page - 1) * displayPageSize,
+    page * displayPageSize,
+  )
+
   const load = useCallback(() => {
     setLoading(true)
-    getLeaderboard({ direction, page, page_size: pageSize })
+    getLeaderboard({ direction, page: 1, page_size: 200 })
       .then((res) => {
         setRows(res.items)
-        setTotal(res.total)
       })
       .finally(() => setLoading(false))
-  }, [direction, page, pageSize])
+  }, [direction])
 
   useEffect(() => {
     setPage(1)
-  }, [search, minVolume, minFunding])
+  }, [search, minVolume, minFunding, direction])
 
   useEffect(() => {
     load()
@@ -115,8 +119,6 @@ export function LeaderboardPage() {
       if (timerRef.current) clearInterval(timerRef.current)
     }
   }, [autoRefresh, refreshInterval, load])
-
-  const totalPages = Math.ceil(total / pageSize)
 
   const handleStart = (row: LeaderboardRow) => {
     const params = new URLSearchParams({
@@ -241,7 +243,7 @@ export function LeaderboardPage() {
                 </td>
               </tr>
             ) : (
-              filtered.map((row) => {
+              pageItems.map((row) => {
                 const isPinned = pinned.has(pinKey(row))
                 return (
                   <tr
@@ -391,7 +393,7 @@ export function LeaderboardPage() {
       </div>
 
       <p className="mt-2 text-center text-xs text-gray-600">
-        共 {total} 条{autoRefresh && ` · 每 ${refreshInterval}s 刷新`}
+        显示 {filteredTotal} 条{autoRefresh && ` · 每 ${refreshInterval}s 刷新`}
       </p>
     </div>
   )
