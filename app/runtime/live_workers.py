@@ -1848,15 +1848,29 @@ class RedisArbitrageTaskDispatcher:
                             if str(effective_payload["opportunity_type"]) == "CLOSE":
                                 if self.task_repository is None:
                                     continue
-                                closeable = self.task_repository.find_closeable_task(
-                                    user_id=int(user_id),
-                                    symbol=str(effective_payload["symbol"]),
-                                    spot_exchange=str(effective_payload["spot_exchange"]),
-                                    derivative_exchange=str(
-                                        effective_payload["derivative_exchange"]
-                                    ),
-                                    env_mode=self.env_mode,
-                                )
+                                try:
+                                    closeable = self.task_repository.find_closeable_task(
+                                        user_id=int(user_id),
+                                        symbol=str(effective_payload["symbol"]),
+                                        spot_exchange=str(effective_payload["spot_exchange"]),
+                                        derivative_exchange=str(
+                                            effective_payload["derivative_exchange"]
+                                        ),
+                                        env_mode=self.env_mode,
+                                    )
+                                except Exception:
+                                    if self.task_repository is not None:
+                                        self.task_repository.session.rollback()
+                                    if self.event_router is not None:
+                                        await self.event_router.dispatch(
+                                            _build_arb_dispatcher_task_skipped_event(
+                                                region=self.region,
+                                                payload=effective_payload,
+                                                user_id=user_id,
+                                                skip_reason="close_lookup_failed",
+                                            )
+                                        )
+                                    continue
                                 if closeable is None:
                                     if self.event_router is not None:
                                         await self.event_router.dispatch(
@@ -1868,12 +1882,17 @@ class RedisArbitrageTaskDispatcher:
                                             )
                                         )
                                     continue
-                            task_record = self._create_arbitrage_task(
-                                user_id=user_id,
-                                message_id=str(effective_payload["source_message_id"]),
-                                payload=effective_payload,
-                                strategy=strategy,
-                            )
+                            try:
+                                task_record = self._create_arbitrage_task(
+                                    user_id=user_id,
+                                    message_id=str(effective_payload["source_message_id"]),
+                                    payload=effective_payload,
+                                    strategy=strategy,
+                                )
+                            except Exception:
+                                if self.task_repository is not None:
+                                    self.task_repository.session.rollback()
+                                continue
                             if task_record is not None and self.event_router is not None:
                                 await self.event_router.dispatch(
                                     _build_arb_dispatcher_task_created_event(

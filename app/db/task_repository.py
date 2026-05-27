@@ -32,6 +32,13 @@ class TaskRepository:
         self.session = session
 
     def create_task(self, data: ArbitrageTaskCreate) -> ArbitrageTask:
+        existing = self.session.scalar(
+            select(ArbitrageTask).where(
+                ArbitrageTask.idempotency_key == data.idempotency_key
+            )
+        )
+        if existing is not None:
+            return existing
         task = ArbitrageTask(**asdict(data))
         self.session.add(task)
         self.session.commit()
