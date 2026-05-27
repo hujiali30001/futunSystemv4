@@ -35,17 +35,20 @@ export interface UserInfo {
   is_trading_enabled: boolean
 }
 
-export interface Opportunity {
+export interface LeaderboardRow {
   symbol: string
+  full_symbol: string
   spot_exchange: string
   derivative_exchange: string
-  open_spread_bps: number
-  close_spread_bps: number
-  funding_rate: number
+  open_yield_pct: number
+  close_yield_pct: number
+  funding_rate_display: string
+  funding_rate_raw: number
+  sort_value: number
 }
 
-export interface OpportunityPage {
-  items: Opportunity[]
+export interface LeaderboardPageData {
+  items: LeaderboardRow[]
   total: number
   page: number
   page_size: number
@@ -79,7 +82,7 @@ export interface TaskItem {
   finished_at: string | null
 }
 
-export interface TaskPage {
+export interface TaskPageData {
   items: TaskItem[]
   total: number
   page: number
@@ -101,12 +104,12 @@ export async function getMe() {
   return data
 }
 
-export async function getOpportunities(params: {
+export async function getLeaderboard(params: {
+  direction?: string
   page?: number
   page_size?: number
-  sort_by?: string
 }) {
-  const { data } = await api.get<OpportunityPage>('/opportunities', { params })
+  const { data } = await api.get<LeaderboardPageData>('/opportunities/leaderboard', { params })
   return data
 }
 
@@ -151,6 +154,6 @@ export async function toggleStrategy(id: number) {
 }
 
 export async function getTasks(params: { page?: number; page_size?: number }) {
-  const { data } = await api.get<TaskPage>('/tasks', { params })
+  const { data } = await api.get<TaskPageData>('/tasks', { params })
   return data
 }

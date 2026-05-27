@@ -1,8 +1,10 @@
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 
 @asynccontextmanager
@@ -26,3 +28,7 @@ app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(opportunities.router, prefix="/api/opportunities", tags=["opportunities"])
 app.include_router(strategies.router, prefix="/api/strategies", tags=["strategies"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"])
+
+_web_dir = Path(__file__).resolve().parent.parent.parent / "web" / "dist"
+if _web_dir.exists() and _web_dir.is_dir():
+    app.mount("/", StaticFiles(directory=str(_web_dir), html=True), name="frontend")
