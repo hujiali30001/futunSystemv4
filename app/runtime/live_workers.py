@@ -1082,6 +1082,17 @@ class ArbitrageExecutionTaskConsumer:
                 )
             )
 
+    @staticmethod
+    def _should_skip_repair(result) -> str | None:
+        filled_exchanges = list(getattr(result, "filled_exchanges", []) or [])
+        failed_exchanges = list(getattr(result, "failed_exchanges", []) or [])
+        if not filled_exchanges and len(failed_exchanges) >= 2:
+            return "both_legs_failed"
+        reason = str(getattr(result, "reason", "") or "").lower()
+        if any(kw in reason for kw in ("insufficient", "balance_not_enough", "insufficientfunds")):
+            return "insufficient_funds"
+        return None
+
     async def _run_repair(
         self,
         *,
@@ -1225,6 +1236,21 @@ class ArbitrageExecutionTaskConsumer:
                 )
                 return 1
             if execution_status == "OPEN_PARTIAL" and failed_exchanges:
+                skip_reason = self._should_skip_repair(result)
+                if skip_reason:
+                    self.task_repository.mark_failed(
+                        str(task.task_uuid),
+                        reason=f"skip_repair: {skip_reason}",
+                    )
+                    if self.event_router is not None:
+                        await self.event_router.dispatch(
+                            _build_arb_executor_task_failed_event(
+                                region=self.region,
+                                task=task,
+                                result=result,
+                            )
+                        )
+                    return 1
                 await self._run_repair(
                     task=task,
                     result=result,

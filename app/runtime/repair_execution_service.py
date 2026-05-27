@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import traceback
 from dataclasses import dataclass
 
 from app.exchanges.adapters import ExchangeAdapter, OrderRequest
@@ -90,7 +89,7 @@ class RuntimeRepairExecutionService:
                 target_exchanges=list(target_exchanges),
                 repaired_exchanges=[],
                 remaining_failed_exchanges=[target_exchange],
-                reason=f"{type(exc).__name__}: {exc}\n{traceback.format_exc()[-300:]}",
+                reason=f"{type(exc).__name__}: {exc}",
             )
         finally:
             if adapter is not None:
