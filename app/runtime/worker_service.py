@@ -446,7 +446,9 @@ class WorkerApp:
         )
         credentials_by_exchange = {}
         proxies_by_exchange = {}
-        if self.settings.worker_role != "executor":
+        if self.settings.worker_role in ("arb_scanner", "scanner"):
+            pass
+        elif self.settings.worker_role != "executor":
             credentials_by_exchange = load_exchange_credentials_from_env(exchanges)
             proxies_by_exchange = load_exchange_proxies_from_env(exchanges)
             missing = sorted(set(exchanges) - set(credentials_by_exchange))

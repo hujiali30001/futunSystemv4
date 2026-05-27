@@ -197,19 +197,19 @@ class LiveArbitrageFlowService:
         try:
             for exchange in exchanges:
                 try:
+                    cred = credentials_by_exchange.get(exchange)
                     session = self.session_factory.create_session(
                         exchange=exchange,
                         env_mode=env_mode,
                         proxies=(proxies_by_exchange or {}).get(exchange, {}),
-                        credentials=credentials_by_exchange.get(exchange),
+                        credentials=cred,
                     )
-                    if credentials_by_exchange.get(exchange) is None:
-                        raise RuntimeError(f"no credentials for {exchange}")
                     await session.mark_ready()
-                    await session.client.load_markets()
+                    if session.client and hasattr(session.client, "load_markets"):
+                        await session.client.load_markets()
                     sessions[exchange] = session
                     adapters[exchange] = ExchangeAdapter(session)
-                except Exception as exc:
+                except Exception:
                     failed_exchanges.add(exchange)
 
             usable_exchanges = [e for e in exchanges if e not in failed_exchanges]
