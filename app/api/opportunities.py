@@ -70,6 +70,9 @@ async def leaderboard(
         open_spread_pct = round(open_bps / 100, 2)
         close_spread_pct = round(close_bps / 100, 2)
 
+        if abs(open_spread_pct) >= 500:
+            continue
+
         base_symbol = symbol.replace("/USDT", "")
 
         fr_pct = fr * 100
@@ -107,14 +110,14 @@ async def leaderboard(
     page_items = rows[start:end]
 
     ticker_keys = []
-    key_to_row_idx: dict[str, int] = {}
+    key_to_row_indices: dict[str, list[int]] = {}
     for i, row in enumerate(page_items):
         spot_key = f"md:ticker:{row['spot_exchange']}:{row['full_symbol']}"
         deriv_key = f"md:ticker:{row['derivative_exchange']}:swap:{row['full_symbol']}"
         ticker_keys.append(spot_key)
-        key_to_row_idx[spot_key] = i
+        key_to_row_indices.setdefault(spot_key, []).append(i)
         ticker_keys.append(deriv_key)
-        key_to_row_idx[deriv_key] = i
+        key_to_row_indices.setdefault(deriv_key, []).append(i)
 
     if ticker_keys:
         ticker_vals = await redis.mget(ticker_keys)
@@ -124,8 +127,8 @@ async def leaderboard(
         deriv_vol: dict[int, float] = {}
 
         for key, val in zip(ticker_keys, ticker_vals):
-            row_idx = key_to_row_idx.get(key)
-            if row_idx is None or val is None:
+            indices = key_to_row_indices.get(key, [])
+            if not indices or val is None:
                 continue
             parts = str(val).split("|")
             if len(parts) < 2:
@@ -137,12 +140,13 @@ async def leaderboard(
                 continue
 
             is_spot = ":swap:" not in key
-            if is_spot:
-                spot_last[row_idx] = last_price
-                spot_vol[row_idx] = volume
-            else:
-                deriv_last[row_idx] = last_price
-                deriv_vol[row_idx] = volume
+            for row_idx in indices:
+                if is_spot:
+                    spot_last[row_idx] = last_price
+                    spot_vol[row_idx] = volume
+                else:
+                    deriv_last[row_idx] = last_price
+                    deriv_vol[row_idx] = volume
 
         for i, row in enumerate(page_items):
             sl = spot_last.get(i, 0)
@@ -151,12 +155,6 @@ async def leaderboard(
                 row["index_spread_pct"] = round((dl - sl) / sl * 100, 3)
             row["spot_volume"] = _format_volume(spot_vol.get(i, 0))
             row["deriv_volume"] = _format_volume(deriv_vol.get(i, 0))
-
-    page_items = [
-        row for row in page_items
-        if abs(row["open_spread_pct"]) < 500
-        and not (row["spot_volume"] == "--" and row["deriv_volume"] == "--")
-    ]
 
     return {
         "items": page_items,
