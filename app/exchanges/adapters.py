@@ -31,7 +31,7 @@ class ExchangeAdapter:
                 request.side,
                 request.amount,
                 request.price,
-                params if params else None,
+                params,
             )
         return {
             "id": "simulated-order",
