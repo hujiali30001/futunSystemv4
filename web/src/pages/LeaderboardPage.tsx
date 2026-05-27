@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { type LeaderboardRow } from '../api'
+import { getLeaderboard, type LeaderboardRow } from '../api'
 import { useWebSocket } from '../hooks/useWebSocket'
 
 type Direction = 'spot_futures' | 'futures_spot'
@@ -96,6 +96,23 @@ export function LeaderboardPage() {
     setRows(items)
     setLoading(false)
   }, wsEnabled)
+
+  useEffect(() => {
+    let cancelled = false
+    const fallback = setTimeout(() => {
+      if (cancelled) return
+      getLeaderboard({ direction, page: 1, page_size: 10000 }).then((res) => {
+        if (!cancelled) {
+          setRows(res.items)
+          setLoading(false)
+        }
+      }).catch(() => {})
+    }, 3000)
+    return () => {
+      cancelled = true
+      clearTimeout(fallback)
+    }
+  }, [direction])
 
   useEffect(() => {
     setPage(1)
