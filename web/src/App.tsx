@@ -18,26 +18,36 @@ import { AdminUsersPage } from './pages/admin/UsersPage'
 export default function App() {
   return (
     <BrowserRouter>
-      <div className="min-h-screen bg-gray-950 text-gray-100">
-        <Header />
-        <Routes>
-          <Route path="/" element={<LeaderboardPage />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
-          <Route path="/strategies" element={<StrategiesPage />} />
-          <Route path="/tasks" element={<TasksPage />} />
-          <Route path="/positions" element={<PositionsPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="/admin/login" element={<AdminLoginPage />} />
-          <Route path="/admin" element={<AdminLayout />}>
-            <Route path="limits" element={<LimitsPage />} />
-            <Route path="switches" element={<SwitchesPage />} />
-            <Route path="announcements" element={<AnnouncementsPage />} />
-            <Route path="audit" element={<AuditPage />} />
-            <Route path="users" element={<AdminUsersPage />} />
-          </Route>
-        </Routes>
-      </div>
+      <Routes>
+        <Route path="/admin/*" element={
+          <div className="min-h-screen bg-gray-950 text-gray-100">
+            <Routes>
+              <Route path="login" element={<AdminLoginPage />} />
+              <Route element={<AdminLayout />}>
+                <Route path="limits" element={<LimitsPage />} />
+                <Route path="switches" element={<SwitchesPage />} />
+                <Route path="announcements" element={<AnnouncementsPage />} />
+                <Route path="audit" element={<AuditPage />} />
+                <Route path="users" element={<AdminUsersPage />} />
+              </Route>
+            </Routes>
+          </div>
+        } />
+        <Route path="*" element={
+          <div className="min-h-screen bg-gray-950 text-gray-100">
+            <Header />
+            <Routes>
+              <Route path="/" element={<LeaderboardPage />} />
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/register" element={<RegisterPage />} />
+              <Route path="/strategies" element={<StrategiesPage />} />
+              <Route path="/tasks" element={<TasksPage />} />
+              <Route path="/positions" element={<PositionsPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+            </Routes>
+          </div>
+        } />
+      </Routes>
     </BrowserRouter>
   )
 }
