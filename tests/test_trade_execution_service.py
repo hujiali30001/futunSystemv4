@@ -34,6 +34,9 @@ class FakeAdapter:
             raise RuntimeError(f"{self.exchange} create failed")
         return {"id": f"{self.exchange}-1"}
 
+    async def fetch_usdt_balance(self) -> float:
+        return 100.0
+
     async def close(self) -> None:
         self.closed = True
 

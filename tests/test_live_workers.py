@@ -3863,6 +3863,9 @@ async def test_executor_runtime_trade_execution_service_uses_payload_exchanges_s
         async def close(self) -> None:
             return None
 
+        async def fetch_usdt_balance(self) -> float:
+            return 100.0
+
     class FakeSessionFactory:
         def __init__(self):
             self.configs = {

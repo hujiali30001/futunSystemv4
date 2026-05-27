@@ -46,6 +46,15 @@ class ExchangeAdapter:
             return await self.session.client.fetch_balance()
         return {"total": {}}
 
+    async def fetch_usdt_balance(self) -> float:
+        try:
+            raw = await self.fetch_balance()
+            total = raw.get("total", {}) if isinstance(raw, dict) else {}
+            usdt = total.get("USDT", 0)
+            return float(usdt or 0)
+        except Exception:
+            return 0.0
+
     async def fetch_ticker(self, symbol: str) -> dict:
         if self.session.client is not None and hasattr(self.session.client, "fetch_ticker"):
             return await self.session.client.fetch_ticker(symbol)

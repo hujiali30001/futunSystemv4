@@ -24,7 +24,7 @@ class WorkerSettings(BaseSettings):
         default_factory=lambda: ["okx", "binance", "bybit", "bitget", "gate"]
     )
     orderbook_depth_limit: int = 5
-    target_quote_amount: float = 100.0
+    target_quote_amount: float = 5.0
     scanner_poll_interval_seconds: float = 1.0
     arb_scanner_poll_interval_seconds: float = 5.0
     consumer_block_ms: int = 1000

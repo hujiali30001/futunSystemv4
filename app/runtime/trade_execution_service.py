@@ -15,6 +15,7 @@ class RuntimeExecutionResult:
     execution_status: str | None
     filled_exchanges: list[str]
     failed_exchanges: list[str]
+    reason: str | None = None
 
 
 class RuntimeTradeExecutionService:
@@ -85,6 +86,30 @@ class RuntimeTradeExecutionService:
                 symbol,
                 float(tickers[selected_sell_exchange]["ask"]) * 1.05,
             )
+
+            buy_usdt = await adapters[selected_buy_exchange].fetch_usdt_balance()
+            sell_usdt = await adapters[selected_sell_exchange].fetch_usdt_balance()
+            if selected_buy_exchange == selected_sell_exchange:
+                min_required = target_quote_amount * 2
+                if buy_usdt < min_required:
+                    return RuntimeExecutionResult(
+                        ok=False, execution_status="SKIPPED",
+                        filled_exchanges=[], failed_exchanges=[selected_buy_exchange],
+                        reason=f"InsufficientFunds: {selected_buy_exchange} USDT={buy_usdt:.2f} need={min_required:.2f}",
+                    )
+            else:
+                if buy_usdt < target_quote_amount:
+                    return RuntimeExecutionResult(
+                        ok=False, execution_status="SKIPPED",
+                        filled_exchanges=[], failed_exchanges=[selected_buy_exchange],
+                        reason=f"InsufficientFunds: {selected_buy_exchange} USDT={buy_usdt:.2f} need={target_quote_amount:.0f}",
+                    )
+                if sell_usdt < target_quote_amount:
+                    return RuntimeExecutionResult(
+                        ok=False, execution_status="SKIPPED",
+                        filled_exchanges=[], failed_exchanges=[selected_sell_exchange],
+                        reason=f"InsufficientFunds: {selected_sell_exchange} USDT={sell_usdt:.2f} need={target_quote_amount:.0f}",
+                    )
 
             task = ExecutionTask(
                 task_id=f"{selected_buy_exchange}:{selected_sell_exchange}:{symbol}",

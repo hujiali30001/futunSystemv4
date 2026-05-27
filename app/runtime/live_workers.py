@@ -1235,6 +1235,12 @@ class ArbitrageExecutionTaskConsumer:
                     repair_reason=repair_plan.reason,
                 )
                 return 1
+            if execution_status == "SKIPPED":
+                self.task_repository.mark_failed(
+                    str(task.task_uuid),
+                    reason=str(getattr(result, "reason", None) or "skipped"),
+                )
+                return 1
             if execution_status == "OPEN_PARTIAL" and failed_exchanges:
                 skip_reason = self._should_skip_repair(result)
                 if skip_reason:
