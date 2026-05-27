@@ -85,7 +85,18 @@ async def leaderboard(
         if direction == "spot_futures":
             sort_val = open_spread_pct
         else:
-            sort_val = -open_spread_pct
+            open_spread_pct, close_spread_pct = close_spread_pct, open_spread_pct
+            fr = -fr
+            fr_pct = fr * 100
+            fr_display = (
+                f"{fr_pct:+.4f}%/h/{_funding_interval_h(fr_pct)}"
+                if abs(fr_pct) < 1
+                else f"{fr_pct:+.2f}%/h/{_funding_interval_h(fr_pct)}"
+            )
+            spot, deriv = deriv, spot
+            sort_val = open_spread_pct
+
+        fr_label = "收" if fr > 0 else ("付" if fr < 0 else "")
 
         rows.append({
             "symbol": base_symbol,
@@ -94,7 +105,7 @@ async def leaderboard(
             "derivative_exchange": deriv,
             "open_spread_pct": open_spread_pct,
             "close_spread_pct": close_spread_pct,
-            "funding_rate_display": fr_display,
+            "funding_rate_display": f"{fr_display} {fr_label}" if fr_label else fr_display,
             "funding_rate_raw": fr,
             "sort_value": round(sort_val, 2),
             "index_spread_pct": 0.0,
