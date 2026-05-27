@@ -2215,6 +2215,8 @@ class RedisExecutionTaskConsumer(RedisSpotConsumer):
                                 and repair_plan.action != "NONE"
                             ):
                                 should_emit_failed_event = False
+                            if execution_status == "SKIPPED":
+                                should_emit_failed_event = False
                             if task_uuid is not None and self.task_repository is not None:
                                 self.task_repository.mark_execution_result(
                                     task_uuid,
