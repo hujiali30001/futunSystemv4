@@ -1,8 +1,21 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getLeaderboard, type LeaderboardRow } from '../api'
 
 type Direction = 'spot_futures' | 'futures_spot'
+
+function parseVolume(v: string): number {
+  if (!v || v === '--') return 0
+  const n = parseFloat(v)
+  if (v.endsWith('M')) return n * 1_000_000
+  if (v.endsWith('K')) return n * 1_000
+  return n
+}
+
+function parseFundingRate(v: string): number {
+  const m = v.match(/^([+-]?\d+\.?\d*)%/)
+  return m ? parseFloat(m[1]) : 0
+}
 
 export function LeaderboardPage() {
   const [rows, setRows] = useState<LeaderboardRow[]>([])
@@ -10,9 +23,54 @@ export function LeaderboardPage() {
   const [total, setTotal] = useState(0)
   const [direction, setDirection] = useState<Direction>('spot_futures')
   const [loading, setLoading] = useState(true)
+  const [autoRefresh, setAutoRefresh] = useState(true)
+  const [refreshInterval, setRefreshInterval] = useState(10)
+  const [search, setSearch] = useState('')
+  const [minVolume, setMinVolume] = useState('')
+  const [minFunding, setMinFunding] = useState('')
+  const [pinned, setPinned] = useState<Set<string>>(new Set())
   const pageSize = 20
   const navigate = useNavigate()
   const token = localStorage.getItem('token')
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const pinKey = (r: LeaderboardRow) =>
+    `${r.full_symbol}|${r.spot_exchange}|${r.derivative_exchange}`
+
+  const togglePin = (row: LeaderboardRow) => {
+    setPinned((prev) => {
+      const next = new Set(prev)
+      const k = pinKey(row)
+      if (next.has(k)) next.delete(k)
+      else next.add(k)
+      return next
+    })
+  }
+
+  const filtered = (() => {
+    let list = rows
+    const q = search.trim().toUpperCase()
+    if (q) {
+      list = list.filter((r) => r.symbol.toUpperCase().includes(q))
+    }
+    if (minVolume) {
+      const threshold = parseFloat(minVolume)
+      if (!isNaN(threshold) && threshold > 0) {
+        list = list.filter((r) => parseVolume(r.spot_volume) >= threshold)
+      }
+    }
+    if (minFunding) {
+      const threshold = parseFloat(minFunding)
+      if (!isNaN(threshold)) {
+        list = list.filter(
+          (r) => Math.abs(parseFundingRate(r.funding_rate_display)) >= threshold,
+        )
+      }
+    }
+    const pinnedList = list.filter((r) => pinned.has(pinKey(r)))
+    const rest = list.filter((r) => !pinned.has(pinKey(r)))
+    return [...pinnedList, ...rest]
+  })()
 
   const load = useCallback(() => {
     setLoading(true)
@@ -24,7 +82,22 @@ export function LeaderboardPage() {
       .finally(() => setLoading(false))
   }, [direction, page])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    load()
+  }, [load])
+
+  useEffect(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+      timerRef.current = null
+    }
+    if (autoRefresh) {
+      timerRef.current = setInterval(load, refreshInterval * 1000)
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current)
+    }
+  }, [autoRefresh, refreshInterval, load])
 
   const totalPages = Math.ceil(total / pageSize)
 
@@ -50,12 +123,69 @@ export function LeaderboardPage() {
   return (
     <div className="mx-auto max-w-7xl px-4 py-6">
       <div className="mb-4 flex items-center gap-6">
-        <button onClick={() => switchDir('spot_futures')} className={tabClass('spot_futures')}>
+        <button
+          onClick={() => switchDir('spot_futures')}
+          className={tabClass('spot_futures')}
+        >
           现期排行榜
         </button>
-        <button onClick={() => switchDir('futures_spot')} className={tabClass('futures_spot')}>
+        <button
+          onClick={() => switchDir('futures_spot')}
+          className={tabClass('futures_spot')}
+        >
           期现排行榜
         </button>
+      </div>
+
+      <div className="mb-4 flex flex-wrap items-center gap-3 text-sm">
+        <button
+          onClick={() => setAutoRefresh((v) => !v)}
+          className={`rounded px-3 py-1.5 font-medium ${
+            autoRefresh
+              ? 'bg-emerald-600 text-white hover:bg-emerald-500'
+              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+          }`}
+        >
+          {autoRefresh ? '⏸ 暂停刷新' : '▶ 恢复刷新'}
+        </button>
+        {autoRefresh && (
+          <select
+            value={refreshInterval}
+            onChange={(e) => setRefreshInterval(Number(e.target.value))}
+            className="rounded bg-gray-800 border border-gray-700 px-2 py-1.5 text-gray-300"
+          >
+            <option value={5}>5s</option>
+            <option value={10}>10s</option>
+            <option value={30}>30s</option>
+            <option value={60}>60s</option>
+          </select>
+        )}
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="搜索币种..."
+          className="rounded bg-gray-800 border border-gray-700 px-3 py-1.5 text-gray-300 placeholder-gray-600 w-36"
+        />
+        <input
+          value={minVolume}
+          onChange={(e) => setMinVolume(e.target.value)}
+          placeholder="24h交易额 ≥"
+          className="rounded bg-gray-800 border border-gray-700 px-3 py-1.5 text-gray-300 placeholder-gray-600 w-32"
+        />
+        <input
+          value={minFunding}
+          onChange={(e) => setMinFunding(e.target.value)}
+          placeholder="费率绝对值 ≥ %"
+          className="rounded bg-gray-800 border border-gray-700 px-3 py-1.5 text-gray-300 placeholder-gray-600 w-36"
+        />
+        {pinned.size > 0 && (
+          <button
+            onClick={() => setPinned(new Set())}
+            className="rounded bg-gray-700 px-2 py-1 text-xs text-gray-400 hover:bg-gray-600"
+          >
+            取消置顶 ({pinned.size})
+          </button>
+        )}
       </div>
 
       <div className="overflow-x-auto rounded-lg border border-gray-800">
@@ -78,54 +208,80 @@ export function LeaderboardPage() {
                   加载中...
                 </td>
               </tr>
-            ) : rows.length === 0 ? (
+            ) : filtered.length === 0 ? (
               <tr>
                 <td colSpan={token ? 7 : 6} className="px-3 py-10 text-center text-gray-500">
                   暂无数据
                 </td>
               </tr>
             ) : (
-              rows.map((row, i) => (
-                <tr
-                  key={`${row.full_symbol}-${row.spot_exchange}-${row.derivative_exchange}-${i}`}
-                  className="border-b border-gray-800 hover:bg-gray-900/50"
-                >
-                  <td className="px-3 py-3 font-mono text-sm">
-                    <span className={row.open_spread_pct > 0 ? 'text-emerald-400' : 'text-red-400'}>
-                      {row.open_spread_pct.toFixed(2)}%
-                    </span>
-                    <span className="text-gray-500"> / </span>
-                    <span className={row.close_spread_pct > 0 ? 'text-emerald-400' : 'text-red-400'}>
-                      {row.close_spread_pct.toFixed(2)}%
-                    </span>
-                  </td>
-                  <td className="px-3 py-3 font-medium">{row.symbol}</td>
-                  <td className="px-3 py-3 text-gray-400">
-                    {row.spot_exchange} / {row.derivative_exchange}
-                  </td>
-                  <td className="px-3 py-3 font-mono text-sm text-gray-300">
-                    {row.funding_rate_display}
-                  </td>
-                  <td className="px-3 py-3 text-right text-gray-500">
-                    {row.index_spread_pct !== 0
-                      ? `${row.index_spread_pct > 0 ? '+' : ''}${row.index_spread_pct.toFixed(3)}%`
-                      : '--'}
-                  </td>
-                  <td className="px-3 py-3 text-right text-gray-500">
-                    {row.spot_volume || '--'} / {row.deriv_volume || '--'}
-                  </td>
-                  {token && (
-                    <td className="px-3 py-3 text-center">
-                      <button
-                        onClick={() => handleStart(row)}
-                        className="rounded bg-emerald-600 px-3 py-1 text-xs font-medium hover:bg-emerald-500"
+              filtered.map((row) => {
+                const isPinned = pinned.has(pinKey(row))
+                return (
+                  <tr
+                    key={`${pinKey(row)}`}
+                    onClick={() => togglePin(row)}
+                    className={`cursor-pointer border-b border-gray-800 hover:bg-gray-900/50 ${
+                      isPinned ? 'bg-emerald-900/20' : ''
+                    }`}
+                  >
+                    <td className="px-3 py-3 font-mono text-sm">
+                      <span
+                        className={
+                          row.open_spread_pct > 0 ? 'text-emerald-400' : 'text-red-400'
+                        }
                       >
-                        开始套利
-                      </button>
+                        {row.open_spread_pct.toFixed(2)}%
+                      </span>
+                      <span className="text-gray-500"> / </span>
+                      <span
+                        className={
+                          row.close_spread_pct > 0 ? 'text-emerald-400' : 'text-red-400'
+                        }
+                      >
+                        {row.close_spread_pct.toFixed(2)}%
+                      </span>
                     </td>
-                  )}
-                </tr>
-              ))
+                    <td className="px-3 py-3 font-medium">
+                      {isPinned && (
+                        <span className="mr-1 text-emerald-400" title="已置顶">
+                          📌
+                        </span>
+                      )}
+                      {row.symbol}
+                    </td>
+                    <td className="px-3 py-3 text-gray-400">
+                      {row.spot_exchange} / {row.derivative_exchange}
+                    </td>
+                    <td className="px-3 py-3 font-mono text-sm text-gray-300">
+                      {row.funding_rate_display}
+                    </td>
+                    <td className="px-3 py-3 text-right text-gray-500">
+                      {row.index_spread_pct !== 0
+                        ? `${row.index_spread_pct > 0 ? '+' : ''}${row.index_spread_pct.toFixed(
+                            3,
+                          )}%`
+                        : '--'}
+                    </td>
+                    <td className="px-3 py-3 text-right text-gray-500">
+                      {row.spot_volume || '--'} / {row.deriv_volume || '--'}
+                    </td>
+                    {token && (
+                      <td className="px-3 py-3 text-center">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleStart(row)
+                          }}
+                          className="rounded bg-emerald-600 px-3 py-1 text-xs font-medium hover:bg-emerald-500"
+                        >
+                          开始套利
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                )
+              })
             )}
           </tbody>
         </table>
@@ -173,7 +329,9 @@ export function LeaderboardPage() {
         </button>
       </div>
 
-      <p className="mt-2 text-center text-xs text-gray-600">共 {total} 条</p>
+      <p className="mt-2 text-center text-xs text-gray-600">
+        共 {total} 条{autoRefresh && ` · 每 ${refreshInterval}s 刷新`}
+      </p>
     </div>
   )
 }
