@@ -1,10 +1,11 @@
+import mimetypes
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 
 @asynccontextmanager
@@ -35,5 +36,12 @@ app.include_router(ws.router, prefix="/api/ws", tags=["ws"])
 app.include_router(admin.router, prefix="/api")
 
 _web_dir = Path(__file__).resolve().parent.parent.parent / "web" / "dist"
-if _web_dir.exists() and _web_dir.is_dir():
-    app.mount("/", StaticFiles(directory=str(_web_dir), html=True), name="frontend")
+_index = _web_dir / "index.html"
+if _index.exists():
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str):
+        served = _web_dir / full_path
+        if served.is_file():
+            content_type, _ = mimetypes.guess_type(str(served))
+            return FileResponse(served, media_type=content_type or "application/octet-stream")
+        return FileResponse(str(_index))
