@@ -5,10 +5,6 @@ from app.api.deps import get_redis
 router = APIRouter()
 
 
-def _compute_annualized_pct(spread_bps: float, funding_rate: float) -> float:
-    return (spread_bps / 10000 + funding_rate) * 365 * 100
-
-
 def _funding_interval_h(fr_pct: float) -> int:
     return 4 if abs(fr_pct) > 0.05 else 8
 
@@ -30,7 +26,7 @@ async def leaderboard(
     page_size: int = Query(20, ge=1, le=100),
     redis=Depends(get_redis),
 ):
-    raw = await redis.xrevrange("stream:opportunities", "+", "-", count=8000)
+    raw = await redis.xrevrange("stream:opportunities", "+", "-", count=12000)
 
     latest: dict[tuple[str, str, str, str], dict] = {}
     for msg_id, fields in raw:
@@ -71,8 +67,8 @@ async def leaderboard(
         open_bps = open_entry["open_spread_bps"]
         close_bps = (close_entry or open_entry)["close_spread_bps"]
 
-        open_yield_pct = _compute_annualized_pct(open_bps, fr)
-        close_yield_pct = _compute_annualized_pct(close_bps, fr)
+        open_spread_pct = round(open_bps / 100, 2)
+        close_spread_pct = round(close_bps / 100, 2)
 
         base_symbol = symbol.replace("/USDT", "")
 
@@ -84,17 +80,17 @@ async def leaderboard(
         )
 
         if direction == "spot_futures":
-            sort_val = open_yield_pct
+            sort_val = open_spread_pct
         else:
-            sort_val = _compute_annualized_pct(open_bps, -fr)
+            sort_val = -open_spread_pct
 
         rows.append({
             "symbol": base_symbol,
             "full_symbol": symbol,
             "spot_exchange": spot,
             "derivative_exchange": deriv,
-            "open_yield_pct": round(open_yield_pct, 2),
-            "close_yield_pct": round(close_yield_pct, 2),
+            "open_spread_pct": open_spread_pct,
+            "close_spread_pct": close_spread_pct,
             "funding_rate_display": fr_display,
             "funding_rate_raw": fr,
             "sort_value": round(sort_val, 2),

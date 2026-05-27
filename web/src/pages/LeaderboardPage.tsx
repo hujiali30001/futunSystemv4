@@ -91,12 +91,12 @@ export function LeaderboardPage() {
                   className="border-b border-gray-800 hover:bg-gray-900/50"
                 >
                   <td className="px-3 py-3 font-mono text-sm">
-                    <span className={row.open_yield_pct > 0 ? 'text-emerald-400' : 'text-red-400'}>
-                      {row.open_yield_pct.toFixed(2)}%
+                    <span className={row.open_spread_pct > 0 ? 'text-emerald-400' : 'text-red-400'}>
+                      {row.open_spread_pct.toFixed(2)}%
                     </span>
                     <span className="text-gray-500"> / </span>
-                    <span className={row.close_yield_pct > 0 ? 'text-emerald-400' : 'text-red-400'}>
-                      {row.close_yield_pct.toFixed(2)}%
+                    <span className={row.close_spread_pct > 0 ? 'text-emerald-400' : 'text-red-400'}>
+                      {row.close_spread_pct.toFixed(2)}%
                     </span>
                   </td>
                   <td className="px-3 py-3 font-medium">{row.symbol}</td>

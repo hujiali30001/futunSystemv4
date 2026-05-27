@@ -193,89 +193,119 @@ class LiveArbitrageFlowService:
     ) -> list[dict]:
         sessions: dict[str, ExchangeAccountSession] = {}
         adapters: dict[str, ExchangeAdapter] = {}
+        failed_exchanges: set[str] = set()
         try:
             for exchange in exchanges:
-                session = self.session_factory.create_session(
-                    exchange=exchange,
-                    env_mode=env_mode,
-                    proxies=(proxies_by_exchange or {}).get(exchange, {}),
-                    credentials=credentials_by_exchange[exchange],
-                )
-                await session.mark_ready()
-                sessions[exchange] = session
-                adapters[exchange] = ExchangeAdapter(session)
+                try:
+                    session = self.session_factory.create_session(
+                        exchange=exchange,
+                        env_mode=env_mode,
+                        proxies=(proxies_by_exchange or {}).get(exchange, {}),
+                        credentials=credentials_by_exchange.get(exchange),
+                    )
+                    if credentials_by_exchange.get(exchange) is None:
+                        raise RuntimeError(f"no credentials for {exchange}")
+                    await session.mark_ready()
+                    await session.client.load_markets()
+                    sessions[exchange] = session
+                    adapters[exchange] = ExchangeAdapter(session)
+                except Exception as exc:
+                    failed_exchanges.add(exchange)
+
+            usable_exchanges = [e for e in exchanges if e not in failed_exchanges]
+            if len(usable_exchanges) < 2:
+                return []
 
             sem = asyncio.Semaphore(concurrency)
             results: list[dict] = []
 
             async def _scan_one(symbol: str) -> None:
                 ex_swaps = symbol_swap_map.get(symbol, {})
-                if not ex_swaps:
+                usable_swaps = {
+                    ex: sw for ex, sw in ex_swaps.items()
+                    if ex in adapters
+                }
+                if len(usable_swaps) < 2:
                     return
                 async with sem:
-                    for exchange, swap_symbol in ex_swaps.items():
-                        spot_adapter = adapters.get(exchange)
-                        if spot_adapter is None:
+                    ex_list = sorted(usable_swaps.keys())
+                    spot_orderbooks: dict[str, OrderbookSnapshot] = {}
+                    swap_orderbooks: dict[str, OrderbookSnapshot] = {}
+                    funding_rates: dict[str, float] = {}
+
+                    for exchange in ex_list:
+                        adapter = adapters.get(exchange)
+                        if adapter is None:
+                            continue
+                        swap_symbol = usable_swaps.get(exchange)
+                        if swap_symbol is None:
                             continue
                         try:
-                            spot_ob = await spot_adapter.fetch_orderbook(
+                            spot_ob = await adapter.fetch_orderbook(
                                 symbol, limit=orderbook_depth_limit
                             )
+                            spot_orderbooks[exchange] = OrderbookSnapshot(
+                                best_bid=float(spot_ob["bids"][0][0]),
+                                best_ask=float(spot_ob["asks"][0][0]),
+                                bids=spot_ob["bids"],
+                                asks=spot_ob["asks"],
+                            )
                         except Exception:
                             continue
                         try:
-                            swap_ob = await spot_adapter.fetch_orderbook(
+                            swap_ob = await adapter.fetch_orderbook(
                                 swap_symbol, limit=orderbook_depth_limit
                             )
+                            swap_orderbooks[exchange] = OrderbookSnapshot(
+                                best_bid=float(swap_ob["bids"][0][0]),
+                                best_ask=float(swap_ob["asks"][0][0]),
+                                bids=swap_ob["bids"],
+                                asks=swap_ob["asks"],
+                            )
                         except Exception:
                             continue
-
-                        funding_rate = 0.0
                         try:
                             fr_data = await _fetch_funding_rate_safe(
-                                spot_adapter, swap_symbol
+                                adapter, swap_symbol
                             )
                             if isinstance(fr_data, dict):
-                                funding_rate = float(
+                                funding_rates[exchange] = float(
                                     fr_data.get("fundingRate", 0)
                                     or fr_data.get("funding_rate", 0)
                                     or 0
                                 )
                         except Exception:
-                            pass
+                            funding_rates[exchange] = 0.0
 
-                        spot_snapshot = OrderbookSnapshot(
-                            best_bid=float(spot_ob["bids"][0][0]),
-                            best_ask=float(spot_ob["asks"][0][0]),
-                            bids=spot_ob["bids"],
-                            asks=spot_ob["asks"],
-                        )
-                        derivative_snapshot = OrderbookSnapshot(
-                            best_bid=float(swap_ob["bids"][0][0]),
-                            best_ask=float(swap_ob["asks"][0][0]),
-                            bids=swap_ob["bids"],
-                            asks=swap_ob["asks"],
-                        )
-                        try:
-                            open_opp, close_opp = await self.publish_snapshots(
-                                symbol=symbol,
-                                spot_exchange=exchange,
-                                derivative_exchange=exchange,
-                                spot_snapshot=spot_snapshot,
-                                derivative_snapshot=derivative_snapshot,
-                                funding_rate=funding_rate,
-                            )
-                            results.append(
-                                {
-                                    "symbol": symbol,
-                                    "exchange": exchange,
-                                    "open_spread_bps": open_opp.open_spread_bps,
-                                    "close_spread_bps": close_opp.close_spread_bps,
-                                    "funding_rate": funding_rate,
-                                }
-                            )
-                        except Exception:
+                    for spot_exchange in ex_list:
+                        spot_snap = spot_orderbooks.get(spot_exchange)
+                        if spot_snap is None:
                             continue
+                        for deriv_exchange in ex_list:
+                            swap_snap = swap_orderbooks.get(deriv_exchange)
+                            if swap_snap is None:
+                                continue
+                            fr = funding_rates.get(deriv_exchange, 0.0)
+                            try:
+                                open_opp, close_opp = await self.publish_snapshots(
+                                    symbol=symbol,
+                                    spot_exchange=spot_exchange,
+                                    derivative_exchange=deriv_exchange,
+                                    spot_snapshot=spot_snap,
+                                    derivative_snapshot=swap_snap,
+                                    funding_rate=fr,
+                                )
+                                results.append(
+                                    {
+                                        "symbol": symbol,
+                                        "exchange": f"{spot_exchange}/{deriv_exchange}",
+                                        "open_spread_bps": open_opp.open_spread_bps,
+                                        "close_spread_bps": close_opp.close_spread_bps,
+                                        "funding_rate": fr,
+                                    }
+                                )
+                            except Exception:
+                                continue
 
             await asyncio.gather(
                 *[_scan_one(s) for s in symbol_swap_map],

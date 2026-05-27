@@ -40,8 +40,8 @@ export interface LeaderboardRow {
   full_symbol: string
   spot_exchange: string
   derivative_exchange: string
-  open_yield_pct: number
-  close_yield_pct: number
+  open_spread_pct: number
+  close_spread_pct: number
   funding_rate_display: string
   funding_rate_raw: number
   sort_value: number
