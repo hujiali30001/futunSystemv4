@@ -51,7 +51,11 @@ class RuntimeRepairExecutionService:
             reference_price = (
                 ticker.get("last") or ticker.get("ask") or ticker.get("bid") or 1.0
             )
-            min_amount = session.markets[symbol]["limits"]["amount"]["min"]
+            markets = getattr(session, "markets", None) or {}
+            market_info = markets.get(symbol) or {}
+            limits = market_info.get("limits", {}) if isinstance(market_info, dict) else {}
+            amount_info = limits.get("amount", {}) if isinstance(limits, dict) else {}
+            min_amount = amount_info.get("min", 0.01) if isinstance(amount_info, dict) else 0.01
             amount = adapter.amount_to_precision(
                 symbol,
                 max(float(min_amount), float(target_quote_amount) / float(reference_price)),
