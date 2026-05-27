@@ -31,7 +31,8 @@ export function LeaderboardPage() {
   const [fundingOp, setFundingOp] = useState<'gte' | 'lte'>('gte')
   const [pinned, setPinned] = useState<Set<string>>(new Set())
   const [jumpPage, setJumpPage] = useState('')
-  const pageSize = 20
+  const hasFilter = search.trim() !== '' || minVolume !== '' || minFunding !== ''
+  const pageSize = hasFilter ? 200 : 20
   const navigate = useNavigate()
   const token = localStorage.getItem('token')
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -58,7 +59,11 @@ export function LeaderboardPage() {
     if (minVolume) {
       const threshold = parseFloat(minVolume)
       if (!isNaN(threshold) && threshold > 0) {
-        list = list.filter((r) => parseVolume(r.spot_volume) >= threshold)
+        list = list.filter(
+          (r) =>
+            parseVolume(r.spot_volume) >= threshold ||
+            parseVolume(r.deriv_volume) >= threshold,
+        )
       }
     }
     if (minFunding) {
@@ -88,7 +93,11 @@ export function LeaderboardPage() {
         setTotal(res.total)
       })
       .finally(() => setLoading(false))
-  }, [direction, page])
+  }, [direction, page, pageSize])
+
+  useEffect(() => {
+    setPage(1)
+  }, [search, minVolume, minFunding])
 
   useEffect(() => {
     load()

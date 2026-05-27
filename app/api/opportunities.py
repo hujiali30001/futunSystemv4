@@ -23,7 +23,7 @@ def _format_volume(quote_volume: float) -> str:
 async def leaderboard(
     direction: str = Query("spot_futures", pattern="^(spot_futures|futures_spot)$"),
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=200),
     redis=Depends(get_redis),
 ):
     raw = await redis.xrevrange("stream:opportunities", "+", "-", count=12000)
