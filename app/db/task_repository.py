@@ -74,8 +74,8 @@ class TaskRepository:
         env_mode: str,
     ) -> ArbitrageTask | None:
         claimed_at = datetime.utcnow()
-        candidate_id = (
-            select(ArbitrageTask.id)
+        candidate = self.session.scalars(
+            select(ArbitrageTask)
             .where(
                 ArbitrageTask.env_mode == env_mode,
                 ArbitrageTask.status.in_(("CREATED", "DISPATCHED")),
@@ -87,26 +87,15 @@ class TaskRepository:
             )
             .order_by(ArbitrageTask.id.asc())
             .limit(1)
-            .scalar_subquery()
-        )
-        claimed_id = self.session.execute(
-            update(ArbitrageTask)
-            .where(
-                ArbitrageTask.id == candidate_id,
-                ArbitrageTask.status.in_(("CREATED", "DISPATCHED")),
-            )
-            .values(
-                status="RUNNING",
-                worker_node_id=worker_node_id,
-                started_at=claimed_at,
-            )
-            .returning(ArbitrageTask.id)
-        ).scalar_one_or_none()
-        if claimed_id is None:
-            self.session.rollback()
+        ).first()
+        if candidate is None:
             return None
+        candidate.status = "RUNNING"
+        candidate.worker_node_id = worker_node_id
+        candidate.started_at = claimed_at
         self.session.commit()
-        return self.session.get(ArbitrageTask, claimed_id)
+        self.session.refresh(candidate)
+        return candidate
 
     def find_closeable_task(
         self,
