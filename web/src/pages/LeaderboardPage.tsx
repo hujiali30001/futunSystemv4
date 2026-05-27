@@ -1,7 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getLeaderboard, type LeaderboardRow } from '../api'
-import { useWebSocket } from '../hooks/useWebSocket'
 
 type Direction = 'spot_futures' | 'futures_spot'
 
@@ -34,6 +33,7 @@ export function LeaderboardPage() {
   const displayPageSize = 15
   const navigate = useNavigate()
   const token = localStorage.getItem('token')
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const pinKey = (r: LeaderboardRow) =>
     `${r.full_symbol}|${r.spot_exchange}|${r.derivative_exchange}`
@@ -90,29 +90,32 @@ export function LeaderboardPage() {
     page * displayPageSize,
   )
 
-  const wsEnabled = autoRefresh
-
-  useWebSocket(direction, (items: LeaderboardRow[]) => {
-    setRows(items)
-    setLoading(false)
-  }, wsEnabled)
+  const load = () => {
+    getLeaderboard({ direction, page: 1, page_size: 10000 })
+      .then((res) => {
+        setRows(res.items)
+        setLoading(false)
+      })
+      .catch(() => setLoading(false))
+  }
 
   useEffect(() => {
-    let cancelled = false
-    const fallback = setTimeout(() => {
-      if (cancelled) return
-      getLeaderboard({ direction, page: 1, page_size: 10000 }).then((res) => {
-        if (!cancelled) {
-          setRows(res.items)
-          setLoading(false)
-        }
-      }).catch(() => {})
-    }, 3000)
-    return () => {
-      cancelled = true
-      clearTimeout(fallback)
-    }
+    setLoading(true)
+    load()
   }, [direction])
+
+  useEffect(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+      timerRef.current = null
+    }
+    if (autoRefresh) {
+      timerRef.current = setInterval(load, refreshInterval * 1000)
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current)
+    }
+  }, [autoRefresh, refreshInterval, direction])
 
   useEffect(() => {
     setPage(1)
