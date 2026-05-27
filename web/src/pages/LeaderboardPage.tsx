@@ -106,8 +106,14 @@ export function LeaderboardPage() {
                   <td className="px-3 py-3 font-mono text-sm text-gray-300">
                     {row.funding_rate_display}
                   </td>
-                  <td className="px-3 py-3 text-right text-gray-500">--</td>
-                  <td className="px-3 py-3 text-right text-gray-500">--</td>
+                  <td className="px-3 py-3 text-right text-gray-500">
+                    {row.index_spread_pct !== 0
+                      ? `${row.index_spread_pct > 0 ? '+' : ''}${row.index_spread_pct.toFixed(3)}%`
+                      : '--'}
+                  </td>
+                  <td className="px-3 py-3 text-right text-gray-500">
+                    {row.spot_volume || '--'} / {row.deriv_volume || '--'}
+                  </td>
                   {token && (
                     <td className="px-3 py-3 text-center">
                       <button

@@ -123,6 +123,63 @@ class LiveArbitrageFlowService:
         if not isinstance(snapshot, OrderbookSnapshot):
             raise TypeError(f"{name} must be an OrderbookSnapshot")
 
+    async def _fetch_and_store_tickers(
+        self,
+        *,
+        adapters: dict[str, "ExchangeAdapter"],
+        symbol_swap_map: dict[str, dict[str, str]],
+    ) -> None:
+        symbols_by_exchange: dict[str, set[str]] = {}
+        swap_of: dict[str, set[tuple[str, str]]] = {}
+        for symbol, ex_swaps in symbol_swap_map.items():
+            for exchange, swap_symbol in ex_swaps.items():
+                if exchange not in symbols_by_exchange:
+                    symbols_by_exchange[exchange] = set()
+                    swap_of[exchange] = set()
+                symbols_by_exchange[exchange].add(symbol)
+                symbols_by_exchange[exchange].add(swap_symbol)
+                swap_of[exchange].add((swap_symbol, symbol))
+
+        async def _fetch_for_exchange(exchange: str, symbols: set[str]) -> None:
+            adapter = adapters.get(exchange)
+            if adapter is None:
+                return
+            swaps = {s: spot for s, spot in swap_of.get(exchange, set())}
+            sem = asyncio.Semaphore(3)
+
+            async def _one(sym: str) -> None:
+                async with sem:
+                    try:
+                        ticker = await adapter.fetch_ticker(sym)
+                    except Exception:
+                        return
+                    qv = float(
+                        ticker.get("quoteVolume")
+                        or ticker.get("quote_volume")
+                        or 0
+                    )
+                    last = float(ticker.get("last") or 0)
+                    val = f"{qv}|{last}"
+                    await self.redis_client.setex(
+                        f"md:ticker:{exchange}:{sym}",
+                        300,
+                        val,
+                    )
+                    spot_of_swap = swaps.get(sym)
+                    if spot_of_swap and spot_of_swap != sym:
+                        await self.redis_client.setex(
+                            f"md:ticker:{exchange}:swap:{spot_of_swap}",
+                            300,
+                            val,
+                        )
+
+            await asyncio.gather(*[_one(s) for s in symbols], return_exceptions=True)
+
+        await asyncio.gather(
+            *[_fetch_for_exchange(ex, syms) for ex, syms in symbols_by_exchange.items()],
+            return_exceptions=True,
+        )
+
     async def run_batch(
         self,
         *,
@@ -224,6 +281,12 @@ class LiveArbitrageFlowService:
                 *[_scan_one(s) for s in symbol_swap_map],
                 return_exceptions=True,
             )
+
+            await self._fetch_and_store_tickers(
+                adapters=adapters,
+                symbol_swap_map=symbol_swap_map,
+            )
+
             return results
         finally:
             await asyncio.gather(
