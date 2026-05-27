@@ -31,11 +31,11 @@ def test_calculator_returns_open_and_close_spread():
     )
 
     assert round(result.open_spread_bps, 2) == round(
-        ((105.0 - 101.0) / 101.0) * 10000,
+        ((104.0 - 101.0) / 101.0) * 10000,
         2,
     )
     assert round(result.close_spread_bps, 2) == round(
-        ((104.0 - 100.0) / 100.0) * 10000,
+        ((105.0 - 100.0) / 100.0) * 10000,
         2,
     )
     assert result.redis_member.startswith("binance:okx:BTC/USDT")
@@ -104,11 +104,11 @@ def test_calculator_builds_arbitrage_opportunity_with_explicit_type():
 
     assert result.opportunity_type == "CLOSE"
     assert round(result.open_spread_bps, 2) == round(
-        ((105.0 - 101.0) / 101.0) * 10000,
+        ((104.0 - 101.0) / 101.0) * 10000,
         2,
     )
     assert round(result.close_spread_bps, 2) == round(
-        ((104.0 - 100.0) / 100.0) * 10000,
+        ((105.0 - 100.0) / 100.0) * 10000,
         2,
     )
     assert result.redis_member.startswith("binance:okx:BTC/USDT:CLOSE:")

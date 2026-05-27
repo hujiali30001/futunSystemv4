@@ -152,6 +152,12 @@ async def leaderboard(
             row["spot_volume"] = _format_volume(spot_vol.get(i, 0))
             row["deriv_volume"] = _format_volume(deriv_vol.get(i, 0))
 
+    page_items = [
+        row for row in page_items
+        if abs(row["open_spread_pct"]) < 500
+        and not (row["spot_volume"] == "--" and row["deriv_volume"] == "--")
+    ]
+
     return {
         "items": page_items,
         "total": total,

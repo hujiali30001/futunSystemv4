@@ -94,8 +94,8 @@ class OpportunityCalculator:
         if opportunity_type not in {"OPEN", "CLOSE"}:
             raise ValueError(f"unsupported opportunity_type: {opportunity_type}")
 
-        open_spread = (derivative.best_ask - spot.best_ask) / spot.best_ask
-        close_spread = (derivative.best_bid - spot.best_bid) / spot.best_bid
+        open_spread = (derivative.best_bid - spot.best_ask) / spot.best_ask
+        close_spread = (derivative.best_ask - spot.best_bid) / spot.best_bid
         current_time = time()
         return ArbitrageOpportunity(
             symbol=symbol,
