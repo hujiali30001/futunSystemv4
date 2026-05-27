@@ -109,6 +109,8 @@ async def leaderboard(
             "funding_rate_raw": fr,
             "sort_value": round(sort_val, 2),
             "index_spread_pct": 0.0,
+            "spot_price": "",
+            "deriv_price": "",
             "spot_volume": "",
             "deriv_volume": "",
         })
@@ -164,6 +166,8 @@ async def leaderboard(
             dl = deriv_last.get(i, 0)
             if sl > 0 and dl > 0:
                 row["index_spread_pct"] = round((dl - sl) / sl * 100, 3)
+            row["spot_price"] = f"{sl:.5f}" if sl > 0 else ""
+            row["deriv_price"] = f"{dl:.5f}" if dl > 0 else ""
             row["spot_volume"] = _format_volume(spot_vol.get(i, 0))
             row["deriv_volume"] = _format_volume(deriv_vol.get(i, 0))
 

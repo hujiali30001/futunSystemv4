@@ -46,6 +46,8 @@ export interface LeaderboardRow {
   funding_rate_raw: number
   sort_value: number
   index_spread_pct: number
+  spot_price: string
+  deriv_price: string
   spot_volume: string
   deriv_volume: string
 }

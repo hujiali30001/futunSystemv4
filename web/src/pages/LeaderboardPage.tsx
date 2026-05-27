@@ -220,6 +220,7 @@ export function LeaderboardPage() {
               <th className="px-3 py-3 w-[150px]">开清差价</th>
               <th className="px-3 py-3">币种名称</th>
               <th className="px-3 py-3">交易所</th>
+              <th className="px-3 py-3 text-right">当前价格</th>
               <th className="px-3 py-3">资金费率</th>
               <th className="px-3 py-3 text-right">指数差价(%)</th>
               <th className="px-3 py-3 text-right">24h交易额</th>
@@ -229,13 +230,13 @@ export function LeaderboardPage() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={token ? 7 : 6} className="px-3 py-10 text-center text-gray-500">
+                <td colSpan={token ? 8 : 7} className="px-3 py-10 text-center text-gray-500">
                   加载中...
                 </td>
               </tr>
             ) : filtered.length === 0 ? (
               <tr>
-                <td colSpan={token ? 7 : 6} className="px-3 py-10 text-center text-gray-500">
+                <td colSpan={token ? 8 : 7} className="px-3 py-10 text-center text-gray-500">
                   暂无数据
                 </td>
               </tr>
@@ -277,6 +278,11 @@ export function LeaderboardPage() {
                     </td>
                     <td className="px-3 py-3 text-gray-400">
                       {row.spot_exchange} / {row.derivative_exchange}
+                    </td>
+                    <td className="px-3 py-3 text-right font-mono text-xs text-gray-400">
+                      {row.spot_price || '--'}
+                      <br />
+                      {row.deriv_price || '--'}
                     </td>
                     <td className="px-3 py-3 font-mono text-sm text-gray-300">
                       {row.funding_rate_display}
