@@ -22,29 +22,24 @@ async def list_opportunities(
 
     items = []
     for member, score in members:
-        parts = member.split("|") if "|" in member else [member, "", ""]
-        symbol = parts[0] if parts[0] else "UNKNOWN"
-        spot_exchange = parts[1] if len(parts) > 1 else ""
-        derivative_exchange = parts[2] if len(parts) > 2 else ""
-        spread_bps = score
-
-        funding_key = f"md:funding:{spot_exchange}:{symbol}" if spot_exchange else ""
-        funding_rate = 0.0
-        if funding_key:
-            val = await redis.get(funding_key)
-            if val is not None:
-                try:
-                    funding_rate = float(val)
-                except (ValueError, TypeError):
-                    pass
+        member_str = str(member)
+        parts = member_str.split(":")
+        if len(parts) >= 3:
+            symbol = parts[2]
+            spot_exchange = parts[0] if parts[0] else ""
+            derivative_exchange = parts[1] if parts[1] else ""
+        else:
+            symbol = member_str
+            spot_exchange = ""
+            derivative_exchange = ""
 
         items.append({
             "symbol": symbol,
             "spot_exchange": spot_exchange,
             "derivative_exchange": derivative_exchange,
-            "open_spread_bps": spread_bps if sort_by == "open_spread_bps" else 0.0,
-            "close_spread_bps": spread_bps if sort_by == "close_spread_bps" else 0.0,
-            "funding_rate": funding_rate,
+            "open_spread_bps": score if sort_by == "open_spread_bps" else 0.0,
+            "close_spread_bps": score if sort_by == "close_spread_bps" else 0.0,
+            "funding_rate": 0.0,
         })
 
     return {
