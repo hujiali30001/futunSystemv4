@@ -56,13 +56,14 @@ class RuntimeRepairExecutionService:
                 symbol,
                 max(float(min_amount), float(target_quote_amount) / float(reference_price)),
             )
+            market_order_price = float(reference_price) if side == "buy" else None
             await adapter.create_order(
                 OrderRequest(
                     symbol=symbol,
                     side=side,
                     order_type="market",
                     amount=float(amount),
-                    price=None,
+                    price=market_order_price,
                 )
             )
             return RuntimeRepairResult(

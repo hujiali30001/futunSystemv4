@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta
 
 from sqlalchemy import create_engine
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.session import build_session_factory
@@ -806,28 +805,26 @@ def test_task_repository_enforces_unique_idempotency_key():
         home_region="main",
     )
 
-    repository.create_task(task_data)
+    task1 = repository.create_task(task_data)
+    assert task1.task_uuid == "task-1"
 
-    try:
-        repository.create_task(
-            ArbitrageTaskCreate(
-                task_uuid="task-2",
-                user_id=42,
-                strategy_config_id=None,
-                opportunity_id="opp-2",
-                env_mode="testnet",
-                task_type="open",
-                symbol="BTC/USDT",
-                spot_exchange="okx",
-                derivative_exchange="gate",
-                target_notional=50.0,
-                expected_spread_bps=80.0,
-                expected_funding_bps=0.0,
-                idempotency_key="idem-1",
-                home_region="main",
-            )
+    duplicate = repository.create_task(
+        ArbitrageTaskCreate(
+            task_uuid="task-2",
+            user_id=42,
+            strategy_config_id=None,
+            opportunity_id="opp-2",
+            env_mode="testnet",
+            task_type="open",
+            symbol="BTC/USDT",
+            spot_exchange="okx",
+            derivative_exchange="gate",
+            target_notional=50.0,
+            expected_spread_bps=80.0,
+            expected_funding_bps=0.0,
+            idempotency_key="idem-1",
+            home_region="main",
         )
-    except IntegrityError:
-        session.rollback()
-    else:
-        raise AssertionError("expected duplicate idempotency_key to raise IntegrityError")
+    )
+    assert duplicate.id == task1.id
+    assert duplicate.target_notional == 100.0

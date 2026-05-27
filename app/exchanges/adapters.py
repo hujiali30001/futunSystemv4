@@ -20,7 +20,9 @@ class ExchangeAdapter:
 
     async def create_order(self, request: OrderRequest) -> dict:
         if self.session.client is not None and hasattr(self.session.client, "create_order"):
-            params = {"reduceOnly": request.reduce_only}
+            params: dict = {}
+            if request.reduce_only:
+                params["reduceOnly"] = True
             if request.post_only:
                 params["postOnly"] = True
             return await self.session.client.create_order(
@@ -29,7 +31,7 @@ class ExchangeAdapter:
                 request.side,
                 request.amount,
                 request.price,
-                params,
+                params if params else None,
             )
         return {
             "id": "simulated-order",

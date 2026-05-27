@@ -2005,10 +2005,15 @@ class RedisExecutionTaskConsumer(RedisSpotConsumer):
                             else None
                         )
                         if task_uuid is not None and self.task_repository is not None:
-                            self.task_repository.mark_executing(
-                                task_uuid,
-                                worker_node_id=self.region,
-                            )
+                            try:
+                                self.task_repository.mark_executing(
+                                    task_uuid,
+                                    worker_node_id=self.region,
+                                )
+                            except LookupError:
+                                self.last_id = message_id
+                                processed += 1
+                                continue
                         effective_payload = payload
                         if self.control_guard is not None:
                             requested_notional = float(
