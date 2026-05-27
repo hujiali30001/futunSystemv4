@@ -30,6 +30,7 @@ export function LeaderboardPage() {
   const [minFunding, setMinFunding] = useState('')
   const [fundingOp, setFundingOp] = useState<'gte' | 'lte'>('gte')
   const [pinned, setPinned] = useState<Set<string>>(new Set())
+  const [jumpPage, setJumpPage] = useState('')
   const pageSize = 20
   const navigate = useNavigate()
   const token = localStorage.getItem('token')
@@ -304,6 +305,13 @@ export function LeaderboardPage() {
 
       <div className="mt-4 flex items-center justify-center gap-3 text-sm">
         <button
+          onClick={() => setPage(1)}
+          disabled={page <= 1}
+          className="rounded bg-gray-800 px-2.5 py-1.5 disabled:opacity-30 hover:bg-gray-700"
+        >
+          首页
+        </button>
+        <button
           onClick={() => setPage((p) => Math.max(1, p - 1))}
           disabled={page <= 1}
           className="rounded bg-gray-800 px-3 py-1.5 disabled:opacity-30 hover:bg-gray-700"
@@ -342,6 +350,29 @@ export function LeaderboardPage() {
         >
           下一页
         </button>
+        <button
+          onClick={() => setPage(totalPages)}
+          disabled={page >= totalPages}
+          className="rounded bg-gray-800 px-2.5 py-1.5 disabled:opacity-30 hover:bg-gray-700"
+        >
+          尾页
+        </button>
+        <span className="text-gray-500">/ {totalPages}</span>
+        <input
+          value={jumpPage}
+          onChange={(e) => setJumpPage(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              const n = parseInt(jumpPage, 10)
+              if (!isNaN(n) && n >= 1 && n <= totalPages) {
+                setPage(n)
+                setJumpPage('')
+              }
+            }
+          }}
+          placeholder="跳到"
+          className="w-14 rounded bg-gray-800 border border-gray-700 px-2 py-1.5 text-center text-gray-300 placeholder-gray-600"
+        />
       </div>
 
       <p className="mt-2 text-center text-xs text-gray-600">
