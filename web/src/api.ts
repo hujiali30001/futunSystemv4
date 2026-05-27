@@ -300,12 +300,12 @@ export interface AdminMeResponse {
 }
 
 export async function adminLogin(username: string, password: string) {
-  const { data } = await api.post<AdminLoginResponse>('/admin/auth/login', { username, password })
+  const { data } = await api.post<AdminLoginResponse>('/admin/login', { username, password })
   return data
 }
 
 export async function getAdminMe() {
-  const { data } = await api.get<AdminMeResponse>('/admin/auth/me')
+  const { data } = await api.get<AdminMeResponse>('/admin/me')
   return data
 }
 
