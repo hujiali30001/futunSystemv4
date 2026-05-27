@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import traceback
 from dataclasses import dataclass
 
 from app.exchanges.adapters import ExchangeAdapter, OrderRequest
@@ -37,16 +38,18 @@ class RuntimeRepairExecutionService:
         target_exchange = target_exchanges[0]
         remaining_target_exchanges = list(target_exchanges[1:])
         side = "buy" if target_exchange == buy_exchange else "sell"
-        session = self.session_factory.create_session(
-            exchange=target_exchange,
-            env_mode=env_mode,
-            proxies=(proxies_by_exchange or {}).get(target_exchange, {}),
-            credentials=credentials_by_exchange[target_exchange],
-        )
-        await session.mark_ready()
-        adapter = ExchangeAdapter(session)
-
+        adapter = None
+        session = None
         try:
+            session = self.session_factory.create_session(
+                exchange=target_exchange,
+                env_mode=env_mode,
+                proxies=(proxies_by_exchange or {}).get(target_exchange, {}),
+                credentials=credentials_by_exchange[target_exchange],
+            )
+            await session.mark_ready()
+            adapter = ExchangeAdapter(session)
+
             ticker = await adapter.fetch_ticker(symbol)
             reference_price = (
                 ticker.get("last") or ticker.get("ask") or ticker.get("bid") or 1.0
@@ -87,7 +90,8 @@ class RuntimeRepairExecutionService:
                 target_exchanges=list(target_exchanges),
                 repaired_exchanges=[],
                 remaining_failed_exchanges=[target_exchange],
-                reason=str(exc),
+                reason=f"{type(exc).__name__}: {exc}\n{traceback.format_exc()[-300:]}",
             )
         finally:
-            await adapter.close()
+            if adapter is not None:
+                await adapter.close()

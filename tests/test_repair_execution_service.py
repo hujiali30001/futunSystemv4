@@ -109,15 +109,13 @@ async def test_runtime_repair_execution_service_returns_manual_required_when_ord
         env_mode="testnet",
     )
 
-    assert result == RuntimeRepairResult(
-        ok=False,
-        status="MANUAL_REQUIRED",
-        task_uuid="task-1",
-        target_exchanges=["gate"],
-        repaired_exchanges=[],
-        remaining_failed_exchanges=["gate"],
-        reason="repair order failed",
-    )
+    assert result.ok is False
+    assert result.status == "MANUAL_REQUIRED"
+    assert result.task_uuid == "task-1"
+    assert result.target_exchanges == ["gate"]
+    assert result.repaired_exchanges == []
+    assert result.remaining_failed_exchanges == ["gate"]
+    assert "repair order failed" in (result.reason or "")
 
 
 @pytest.mark.asyncio
@@ -139,4 +137,4 @@ async def test_runtime_repair_execution_service_reports_only_target_exchange_as_
 
     assert result.repaired_exchanges == []
     assert result.remaining_failed_exchanges == ["gate"]
-    assert result.reason == "repair order failed"
+    assert "repair order failed" in result.reason
