@@ -4,7 +4,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 def build_engine(database_url: str) -> Engine:
     connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
-    return create_engine(database_url, future=True, connect_args=connect_args)
+    pool_kwargs = {"pool_size": 20, "pool_pre_ping": True, "pool_recycle": 300} if "postgresql" in database_url else {}
+    return create_engine(database_url, future=True, connect_args=connect_args, **pool_kwargs)
 
 
 def build_session_factory(database_url: str) -> sessionmaker[Session]:
