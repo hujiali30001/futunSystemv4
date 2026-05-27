@@ -92,7 +92,7 @@ export function LeaderboardPage() {
 
   const load = useCallback(() => {
     setLoading(true)
-    getLeaderboard({ direction, page: 1, page_size: 200 })
+    getLeaderboard({ direction, page: 1, page_size: 10000 })
       .then((res) => {
         setRows(res.items)
       })
