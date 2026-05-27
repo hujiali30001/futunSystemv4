@@ -312,6 +312,7 @@ class DefaultWorkerFactory:
             block_ms=self.settings.consumer_block_ms,
             region=self.settings.worker_region,
             env_mode=self.settings.env_mode,
+            event_router=self.event_router,
         )
 
     def build_executor_worker(self, *, redis_client: Redis) -> ConsumerWorker:
@@ -366,6 +367,8 @@ class DefaultWorkerFactory:
             worker_node_id=self.settings.node_id,
             env_mode=self.settings.env_mode,
             risk_manager=RiskManager(),
+            event_router=self.event_router,
+            region=self.settings.worker_region,
         )
         return ArbitrageExecutorWorker(
             consumer=consumer,
