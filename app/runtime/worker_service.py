@@ -57,6 +57,7 @@ from app.runtime.worker_config import (
     load_exchange_proxies_from_env,
 )
 from app.trading.risk_manager import RiskManager
+from app.trading.order_recorder import OrderRecorder
 
 
 class ScannerWorker:
@@ -357,6 +358,7 @@ class DefaultWorkerFactory:
 
         session_factory = build_session_factory(self.settings.database_url)
         session = session_factory()
+        order_recorder = OrderRecorder(session_factory)
         consumer = ArbitrageExecutionTaskConsumer(
             task_repository=TaskRepository(session),
             execution_adapter=ArbitrageExecutionAdapter(
@@ -369,6 +371,7 @@ class DefaultWorkerFactory:
             risk_manager=RiskManager(),
             event_router=self.event_router,
             region=self.settings.worker_region,
+            order_recorder=order_recorder,
         )
         return ArbitrageExecutorWorker(
             consumer=consumer,
