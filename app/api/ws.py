@@ -87,8 +87,12 @@ async def leaderboard_ws(
 
         keys = []
         for r in top100:
-            keys.append(f"md:ticker:{r['spot_exchange']}:{r['full_symbol']}")
-            keys.append(f"md:ticker:{r['derivative_exchange']}:swap:{r['full_symbol']}")
+            if direction == "futures_spot":
+                keys.append(f"md:ticker:{r['spot_exchange']}:swap:{r['full_symbol']}")
+                keys.append(f"md:ticker:{r['derivative_exchange']}:{r['full_symbol']}")
+            else:
+                keys.append(f"md:ticker:{r['spot_exchange']}:{r['full_symbol']}")
+                keys.append(f"md:ticker:{r['derivative_exchange']}:swap:{r['full_symbol']}")
         vals = await redis.mget(keys) if keys else []
 
         spot_prices: dict = {}
@@ -98,7 +102,8 @@ async def leaderboard_ws(
         for i, r in enumerate(top100):
             sv = vals[i * 2] if i * 2 < len(vals) else None
             dv = vals[i * 2 + 1] if i * 2 + 1 < len(vals) else None
-            for val, is_spot in [(sv, True), (dv, False)]:
+            pairs = [(dv, True), (sv, False)] if direction == "futures_spot" else [(sv, True), (dv, False)]
+            for val, is_spot in pairs:
                 if val is None:
                     continue
                 parts = str(val).split("|")

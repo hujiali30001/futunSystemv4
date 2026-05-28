@@ -117,8 +117,12 @@ async def leaderboard(
     ticker_keys = []
     key_to_row_indices: dict[str, list[int]] = {}
     for i, row in enumerate(page_items):
-        spot_key = f"md:ticker:{row['spot_exchange']}:{row['full_symbol']}"
-        deriv_key = f"md:ticker:{row['derivative_exchange']}:swap:{row['full_symbol']}"
+        if direction == "futures_spot":
+            spot_key = f"md:ticker:{row['spot_exchange']}:swap:{row['full_symbol']}"
+            deriv_key = f"md:ticker:{row['derivative_exchange']}:{row['full_symbol']}"
+        else:
+            spot_key = f"md:ticker:{row['spot_exchange']}:{row['full_symbol']}"
+            deriv_key = f"md:ticker:{row['derivative_exchange']}:swap:{row['full_symbol']}"
         ticker_keys.append(spot_key)
         key_to_row_indices.setdefault(spot_key, []).append(i)
         ticker_keys.append(deriv_key)

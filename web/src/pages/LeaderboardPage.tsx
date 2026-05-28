@@ -313,6 +313,10 @@ export function LeaderboardPage() {
                     </td>
                     <td className="px-3 py-3 font-mono text-sm text-gray-300">
                       {row.funding_rate_display}
+                      <br />
+                      <span className="text-xs text-gray-600">
+                        ({(row.funding_rate_raw * 100).toFixed(4)}%)
+                      </span>
                     </td>
                     <td className="px-3 py-3 text-right text-gray-500">
                       {row.index_spread_pct !== 0
