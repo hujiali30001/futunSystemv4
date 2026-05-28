@@ -471,6 +471,33 @@ export async function getBalances() {
   return data
 }
 
+export interface LiquidateOrder {
+  symbol: string
+  status: string
+  filled?: number
+  cost?: number
+  price?: number
+  order_id?: string
+  reason?: string
+}
+
+export interface LiquidateExchange {
+  exchange: string
+  env_mode: string
+  error: string | null
+  orders: LiquidateOrder[]
+}
+
+export interface LiquidateResult {
+  exchanges: LiquidateExchange[]
+  summary: { total_sold_usdt: number; orders_placed: number; errors: number }
+}
+
+export async function liquidateAssets(exchanges?: string[]) {
+  const { data } = await api.post<LiquidateResult>('/settings/liquidate', { exchanges: exchanges ?? null })
+  return data
+}
+
 export interface TradeToggleResponse {
   is_trading_enabled: boolean
 }

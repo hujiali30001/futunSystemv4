@@ -6,9 +6,11 @@ import {
   updateExchangeAccount,
   deleteExchangeAccount,
   getBalances,
+  liquidateAssets,
   type UserSettings,
   type SmtpSettings,
   type BalancesData,
+  type LiquidateResult,
 } from '../api'
 
 type Tab = 'notify' | 'api' | 'balance'
@@ -40,6 +42,10 @@ export function SettingsPage() {
 
   const [balances, setBalances] = useState<BalancesData | null>(null)
   const [loadingBal, setLoadingBal] = useState(false)
+
+  const [liquidating, setLiquidating] = useState(false)
+  const [liquidateResult, setLiquidateResult] = useState<LiquidateResult | null>(null)
+  const [showLiqConfirm, setShowLiqConfirm] = useState(false)
 
   const showToast = (msg: string) => {
     setToast(msg)
@@ -116,6 +122,21 @@ export function SettingsPage() {
     }
   }
 
+  const handleLiquidate = async () => {
+    setShowLiqConfirm(false)
+    setLiquidating(true)
+    setLiquidateResult(null)
+    try {
+      const res = await liquidateAssets()
+      setLiquidateResult(res)
+      showToast(`清仓完成: ${res.summary.orders_placed} 笔, $${res.summary.total_sold_usdt.toLocaleString()}`)
+    } catch {
+      showToast('清仓请求失败')
+    } finally {
+      setLiquidating(false)
+    }
+  }
+
   if (!settings) return <div className="p-6 text-gray-500">加载中...</div>
 
   return (
@@ -147,7 +168,7 @@ export function SettingsPage() {
 
       {tab === 'notify' && <NotifyTab email={email} setEmail={setEmail} feishu={feishu} setFeishu={setFeishu} smtp={smtp} setSmtp={setSmtp} saving={saving} onSave={saveProfile} />}
       {tab === 'api' && <ApiTab settings={settings} editEx={editEx} setEditEx={setEditEx} exForm={exForm} setExForm={setExForm} onSave={handleExchangeSave} onDelete={handleDelete} />}
-      {tab === 'balance' && <BalanceTab balances={balances} loadingBal={loadingBal} onRefresh={refreshBalance} />}
+      {tab === 'balance' && <BalanceTab balances={balances} loadingBal={loadingBal} onRefresh={refreshBalance} liquidating={liquidating} liquidateResult={liquidateResult} showLiqConfirm={showLiqConfirm} setShowLiqConfirm={setShowLiqConfirm} onLiquidate={handleLiquidate} closeResult={() => setLiquidateResult(null)} />}
     </div>
   )
 }
@@ -380,11 +401,19 @@ function ApiTab({
 
 function BalanceTab({
   balances, loadingBal, onRefresh,
+  liquidating, liquidateResult, showLiqConfirm, setShowLiqConfirm, onLiquidate, closeResult,
 }: {
   balances: BalancesData | null
   loadingBal: boolean
   onRefresh: () => void
+  liquidating: boolean
+  liquidateResult: LiquidateResult | null
+  showLiqConfirm: boolean
+  setShowLiqConfirm: (v: boolean) => void
+  onLiquidate: () => void
+  closeResult: () => void
 }) {
+  const nonUsdtCount = balances?.exchanges.reduce((c, e) => c + e.assets.filter(a => a.currency !== 'USDT').length, 0) ?? 0
   return (
     <div className="rounded-lg border border-gray-800 bg-gray-900 p-5">
       <div className="mb-4 flex items-center justify-between">
@@ -392,14 +421,67 @@ function BalanceTab({
           <h3 className="text-sm font-medium text-gray-300">资产概览</h3>
           <p className="text-xs text-gray-600">实时查询各交易所账户余额</p>
         </div>
-        <button
-          onClick={onRefresh}
-          disabled={loadingBal}
-          className="rounded bg-gray-800 px-4 py-1.5 text-xs font-medium text-gray-300 hover:bg-gray-700 disabled:opacity-50"
-        >
-          {loadingBal ? '查询中...' : '刷新'}
-        </button>
+        <div className="flex items-center gap-2">
+          {nonUsdtCount > 0 && (
+            <button
+              onClick={() => setShowLiqConfirm(true)}
+              disabled={liquidating}
+              className="rounded bg-red-900/40 px-3 py-1.5 text-xs font-medium text-red-400 hover:bg-red-800/60 disabled:opacity-40 border border-red-800/50"
+            >
+              {liquidating ? '清仓中...' : '一键清仓'}
+            </button>
+          )}
+          <button
+            onClick={onRefresh}
+            disabled={loadingBal}
+            className="rounded bg-gray-800 px-4 py-1.5 text-xs font-medium text-gray-300 hover:bg-gray-700 disabled:opacity-50"
+          >
+            {loadingBal ? '查询中...' : '刷新'}
+          </button>
+        </div>
       </div>
+
+      {showLiqConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="mx-4 w-full max-w-md rounded-lg border border-gray-700 bg-gray-900 p-6 shadow-xl">
+            <h3 className="mb-2 text-lg font-semibold text-red-400">确认一键清仓</h3>
+            <p className="mb-4 text-sm text-gray-400">
+              将对所有交易所的非 USDT 资产按当前市价卖出，换成 USDT。<br />
+              此操作不可撤销，确定继续？
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => setShowLiqConfirm(false)} className="rounded bg-gray-800 px-4 py-2 text-sm text-gray-300 hover:bg-gray-700">取消</button>
+              <button onClick={onLiquidate} className="rounded bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500">确认清仓</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {liquidateResult && (
+        <div className="mb-5 rounded-lg border border-gray-700 bg-gray-800/50 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-sm font-medium text-gray-300">清仓结果</h4>
+            <button onClick={closeResult} className="text-xs text-gray-500 hover:text-gray-300">关闭</button>
+          </div>
+          <div className="flex gap-4 mb-3 text-xs">
+            <span className="text-gray-400">成交 <span className="text-emerald-400 font-bold">{liquidateResult.summary.orders_placed}</span> 笔</span>
+            <span className="text-gray-400">卖出 <span className="text-emerald-400 font-bold">${liquidateResult.summary.total_sold_usdt.toLocaleString()}</span></span>
+            {liquidateResult.summary.errors > 0 && <span className="text-red-400">失败 {liquidateResult.summary.errors} 笔</span>}
+          </div>
+          {liquidateResult.exchanges.map((ex) => ex.orders.length > 0 && (
+            <div key={ex.exchange} className="mb-2 last:mb-0">
+              <div className="text-xs text-gray-500 mb-1 uppercase">{ex.exchange} {ex.env_mode}</div>
+              <div className="flex flex-wrap gap-1.5">
+                {ex.orders.map((o, i) => (
+                  <span key={i} className={`rounded px-2 py-0.5 text-xs font-mono ${o.status === 'closed' || o.status === 'open' ? 'bg-emerald-900/40 text-emerald-400' : o.status === 'error' ? 'bg-red-900/30 text-red-400' : 'bg-gray-800 text-gray-500'}`}>
+                    {o.symbol} {o.status === 'closed' || o.status === 'open' ? `$${(o.cost ?? 0).toLocaleString()}` : (o.reason ?? o.status)}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {balances ? (
         <div>

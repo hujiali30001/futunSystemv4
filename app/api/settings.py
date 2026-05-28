@@ -253,3 +253,85 @@ async def get_balances(
     exchange_balances = sorted(results, key=lambda e: e["total_usdt"], reverse=True)
     total_usdt = sum(e["total_usdt"] for e in exchange_balances)
     return {"exchanges": exchange_balances, "total_usdt": round(total_usdt, 2)}
+
+
+class LiquidateRequest(BaseModel):
+    exchanges: list[str] | None = None
+
+
+@router.post("/settings/liquidate")
+async def liquidate_all(
+    body: LiquidateRequest,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+    cipher: SecretCipher = Depends(get_cipher),
+):
+    accounts = db.query(ExchangeAccount).filter(ExchangeAccount.user_id == user["user_id"]).all()
+    if not accounts:
+        return {"orders": [], "summary": {"total_sold_usdt": 0, "orders_placed": 0, "errors": 0}}
+
+    factory = ExchangeClientFactory()
+    LIQUIDATE_TIMEOUT = 30
+
+    async def _liquidate_one(acct) -> dict:
+        ex_results: list[dict] = []
+        ex_name = acct.exchange
+        try:
+            api_key = cipher.decrypt(acct.api_key_ciphertext)
+            secret = cipher.decrypt(acct.secret_ciphertext)
+            if not api_key or not secret:
+                return {"exchange": ex_name, "env_mode": acct.env_mode, "error": "missing credentials", "orders": []}
+
+            creds = ExchangeCredentials(api_key=api_key, secret=secret, password=cipher.decrypt(acct.passphrase_ciphertext))
+            session = factory.create_session(exchange=ex_name, env_mode=acct.env_mode, proxies={}, credentials=creds)
+            client = session.client
+            try:
+                bal = await asyncio.wait_for(client.fetch_balance(), timeout=LIQUIDATE_TIMEOUT)
+            except asyncio.TimeoutError:
+                await session.close()
+                return {"exchange": ex_name, "env_mode": acct.env_mode, "error": "timeout", "orders": []}
+
+            for currency, info in (bal.get("free") or {}).items():
+                free = float(info if isinstance(info, (int, float)) else info.get("free", 0) or 0)
+                if free <= 0 or currency in ("USDT", "USD"):
+                    continue
+
+                symbol = f"{currency}/USDT"
+                try:
+                    ticker = await asyncio.wait_for(client.fetch_ticker(symbol), timeout=10)
+                    price = float(ticker.get("last", 0) or 0)
+                    if price <= 0:
+                        ex_results.append({"symbol": symbol, "status": "skipped", "reason": "no price"})
+                        continue
+
+                    amount_str = client.amount_to_precision(symbol, free)
+                    order = await asyncio.wait_for(
+                        client.create_market_sell_order(symbol, amount_str),
+                        timeout=20,
+                    )
+                    filled = float(order.get("filled", 0) or 0)
+                    cost = float(order.get("cost", 0) or 0)
+                    ex_results.append({"symbol": symbol, "status": order.get("status", "unknown"), "filled": filled, "cost": round(cost, 2), "price": round(price, 6), "order_id": order.get("id", "")})
+                except Exception as exc:
+                    ex_results.append({"symbol": symbol, "status": "error", "reason": str(exc)[:100]})
+
+            await session.close()
+            return {"exchange": ex_name, "env_mode": acct.env_mode, "error": None, "orders": ex_results}
+        except Exception as exc:
+            return {"exchange": ex_name, "env_mode": acct.env_mode, "error": str(exc)[:200], "orders": []}
+
+    target = [a for a in accounts if body.exchanges is None or a.exchange in body.exchanges]
+    all_results = await asyncio.gather(*[_liquidate_one(a) for a in target])
+
+    total_sold = 0.0
+    orders_placed = 0
+    errors = 0
+    for r in all_results:
+        for o in r.get("orders", []):
+            if o.get("status") in ("closed", "open"):
+                total_sold += o.get("cost", 0)
+                orders_placed += 1
+            elif o.get("status") == "error":
+                errors += 1
+
+    return {"exchanges": all_results, "summary": {"total_sold_usdt": round(total_sold, 2), "orders_placed": orders_placed, "errors": errors}}
