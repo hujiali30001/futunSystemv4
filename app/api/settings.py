@@ -239,7 +239,7 @@ async def get_balances(
 
             await session.close()
 
-            assets = [a for a in assets_raw if a["usdt_value"] > 0.005]
+            assets = [a for a in assets_raw if a["usdt_value"] >= 1.0]
             assets.sort(key=lambda a: a["usdt_value"], reverse=True)
             ex_total = sum(a["usdt_value"] for a in assets)
             return {"exchange": acct.exchange, "env_mode": acct.env_mode, "error": None, "assets": assets, "total_usdt": round(ex_total, 2)}
@@ -285,6 +285,15 @@ async def liquidate_all(
             creds = ExchangeCredentials(api_key=api_key, secret=secret, password=cipher.decrypt(acct.passphrase_ciphertext))
             session = factory.create_session(exchange=ex_name, env_mode=acct.env_mode, proxies={}, credentials=creds)
             client = session.client
+
+            try:
+                await asyncio.wait_for(client.load_markets(), timeout=LIQUIDATE_TIMEOUT)
+            except asyncio.TimeoutError:
+                await session.close()
+                return {"exchange": ex_name, "env_mode": acct.env_mode, "error": "load markets timeout", "orders": []}
+            except Exception:
+                pass
+
             try:
                 bal = await asyncio.wait_for(client.fetch_balance(), timeout=LIQUIDATE_TIMEOUT)
             except asyncio.TimeoutError:
@@ -292,11 +301,23 @@ async def liquidate_all(
                 return {"exchange": ex_name, "env_mode": acct.env_mode, "error": "timeout", "orders": []}
 
             for currency, info in (bal.get("free") or {}).items():
-                free = float(info if isinstance(info, (int, float)) else info.get("free", 0) or 0)
-                if free <= 0 or currency in ("USDT", "USD"):
+                free_float = float(info if isinstance(info, (int, float)) else info.get("free", 0) or 0)
+                if free_float <= 0 or currency in ("USDT", "USD"):
                     continue
 
                 symbol = f"{currency}/USDT"
+
+                market = client.markets.get(symbol)
+                if market is None:
+                    ex_results.append({"symbol": symbol, "status": "skipped", "reason": f"no market data for {symbol}"})
+                    continue
+
+                limits = market.get("limits", {}).get("amount", {})
+                min_amount = float(limits.get("min", 0) or 0)
+                if free_float < min_amount and min_amount > 0:
+                    ex_results.append({"symbol": symbol, "status": "skipped", "reason": f"{free_float} < min {min_amount}"})
+                    continue
+
                 try:
                     ticker = await asyncio.wait_for(client.fetch_ticker(symbol), timeout=10)
                     price = float(ticker.get("last", 0) or 0)
@@ -304,7 +325,7 @@ async def liquidate_all(
                         ex_results.append({"symbol": symbol, "status": "skipped", "reason": "no price"})
                         continue
 
-                    amount_str = client.amount_to_precision(symbol, free)
+                    amount_str = client.amount_to_precision(symbol, free_float)
                     order = await asyncio.wait_for(
                         client.create_market_sell_order(symbol, amount_str),
                         timeout=20,
