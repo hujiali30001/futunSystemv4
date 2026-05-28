@@ -34,6 +34,7 @@ class RuntimeRepairExecutionService:
         target_quote_amount: float = 15.0,
         env_mode: str = "testnet",
         proxies_by_exchange: dict[str, dict[str, str]] | None = None,
+        db_task_id: int = 0,
     ) -> RuntimeRepairResult:
         target_exchange = target_exchanges[0]
         remaining_target_exchanges = list(target_exchanges[1:])
@@ -70,7 +71,7 @@ class RuntimeRepairExecutionService:
                 import uuid
                 client_id = f"repair_{target_exchange}_{uuid.uuid4().hex[:8]}"
                 repair_order_id = await self.order_recorder.record_submit(
-                    task_id=0,
+                    task_id=db_task_id,
                     leg_type="spot",
                     exchange=target_exchange,
                     side=side,

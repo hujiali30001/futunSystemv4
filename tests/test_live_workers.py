@@ -5436,6 +5436,7 @@ async def test_arbitrage_execution_consumer_marks_repair_result_for_open_partial
             "target_quote_amount": 100.0,
             "env_mode": "testnet",
             "proxies_by_exchange": proxies_by_exchange,
+            "db_task_id": 0,
         }
     ]
     assert repository.execution_results == []

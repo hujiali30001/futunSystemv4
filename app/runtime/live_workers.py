@@ -1135,6 +1135,7 @@ class ArbitrageExecutionTaskConsumer:
             target_quote_amount=float(task.target_notional),
             env_mode=self.env_mode,
             proxies_by_exchange=proxies_by_exchange,
+            db_task_id=int(getattr(task, "id", 0)),
         )
         if getattr(repair_result, "ok", False):
             repaired_exchanges = list(
@@ -2375,6 +2376,7 @@ class RedisRepairTaskConsumer(RedisSpotConsumer):
                                 payload.get("target_quote_amount", "15.0")
                             ),
                             env_mode=self.env_mode,
+                            db_task_id=self._lookup_db_task_id(str(payload["task_uuid"])),
                         )
                         if self.task_repository is not None:
                             if result.ok:
@@ -2439,6 +2441,19 @@ class RedisRepairTaskConsumer(RedisSpotConsumer):
                             )
             iteration += 1
         return processed
+
+    def _lookup_db_task_id(self, task_uuid: str) -> int:
+        if self.task_repository is None:
+            return 0
+        try:
+            session = self.task_repository.session
+            from models import ArbitrageTask
+            task = session.query(ArbitrageTask).filter(
+                ArbitrageTask.task_uuid == task_uuid
+            ).first()
+            return int(task.id) if task else 0
+        except Exception:
+            return 0
 
 
 class RedisNodeTaskDispatcher:
