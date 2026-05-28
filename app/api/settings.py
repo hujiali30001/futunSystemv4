@@ -169,7 +169,7 @@ async def get_balances(
     factory = ExchangeClientFactory()
 
     COMMON_CRYPTO = [
-        "BTC", "ETH", "USDT", "USDC", "BNB", "SOL", "XRP", "DOGE", "ADA", "DOT",
+         "BTC", "ETH", "USDC", "BNB", "SOL", "XRP", "DOGE", "ADA", "DOT",
         "LINK", "LTC", "BCH", "UNI", "AVAX", "MATIC", "ATOM", "ETC", "XLM", "FIL",
         "TRX", "ICP", "NEAR", "APT", "ARB", "OP", "SUI", "WLD", "SEI", "STRK",
         "AAVE", "ALGO", "SAND", "MANA", "APE", "AXS", "THETA", "FTM", "EGLD", "FLOW",
