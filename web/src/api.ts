@@ -416,8 +416,9 @@ export async function createExchangeAccount(body: {
   api_key: string
   secret: string
   passphrase?: string
+  env_mode?: string
 }) {
-  const { data } = await api.post<ExchangeAccount>('/settings/exchange-accounts', body)
+  const { data } = await api.post<ExchangeAccount>('/settings/exchange', body)
   return data
 }
 
