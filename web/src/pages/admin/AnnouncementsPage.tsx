@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { getAnnouncements, createAnnouncement, deleteAnnouncement } from '../../api'
+import { getAnnouncements, createAnnouncement, deleteAnnouncement, sendAnnouncement } from '../../api'
 
 export function AnnouncementsPage() {
   const [items, setItems] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
+  const [sendingId, setSendingId] = useState<number | null>(null)
 
   const reload = () => {
     getAnnouncements().then((res) => setItems(res.announcements)).finally(() => setLoading(false))
@@ -60,6 +61,15 @@ export function AnnouncementsPage() {
                   <td className="px-3 py-2">{a.status}</td>
                   <td className="px-3 py-2">{a.is_pinned ? '✓' : ''}</td>
                   <td className="px-3 py-2">
+                    {a.channels_json?.length > 0 && (
+                      <button
+                        onClick={async () => { setSendingId(a.id); try { await sendAnnouncement(a.id) } finally { setSendingId(null) } }}
+                        disabled={sendingId === a.id}
+                        className="mr-2 text-xs text-emerald-400 hover:text-emerald-300 disabled:opacity-50"
+                      >
+                        {sendingId === a.id ? '发送中...' : '推送'}
+                      </button>
+                    )}
                     <button onClick={async () => { await deleteAnnouncement(a.id); reload() }} className="text-xs text-red-400 hover:text-red-300">删除</button>
                   </td>
                 </tr>

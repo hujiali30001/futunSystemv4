@@ -302,6 +302,11 @@ export async function deleteAnnouncement(id: number) {
   await api.delete(`/admin/announcements/${id}`)
 }
 
+export async function sendAnnouncement(id: number) {
+  const { data } = await api.post<{ ok: boolean; results: Record<string, string> }>(`/admin/announcements/${id}/send`)
+  return data
+}
+
 export async function getAudit(params: { page_size?: number }) {
   const { data } = await api.get<{ items: AuditLogItem[] }>('/admin/audit', { params })
   return data

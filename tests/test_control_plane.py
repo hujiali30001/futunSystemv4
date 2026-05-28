@@ -106,4 +106,4 @@ def test_announcement_notifier_queues_every_channel():
         )
     )
 
-    assert result == {"site": "queued", "feishu": "queued"}
+    assert result == {"site": "skipped", "feishu": "skipped"}

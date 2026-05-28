@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
-from app.api.deps import get_db, get_current_admin, require_role
+from app.admin.notifier import AnnouncementMessage, AnnouncementNotifier
+from app.api.deps import get_db, get_current_admin, get_redis, require_role
 from models import Announcement, AdminActionLog
 
 router = APIRouter()
@@ -79,3 +80,25 @@ def delete_announcement(announcement_id: int, db: Session = Depends(get_db),
     db.commit()
     _log(db, admin["admin_id"], "delete", "announcement", str(announcement_id), None, None)
     return {"ok": True}
+
+
+@router.post("/announcements/{announcement_id}/send")
+async def send_announcement(
+    announcement_id: int,
+    db: Session = Depends(get_db),
+    admin=Depends(require_role("superadmin", "ops_admin")),
+    redis=Depends(get_redis),
+):
+    a = db.query(Announcement).filter(Announcement.id == announcement_id).first()
+    if not a:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    channels = a.channels_json or []
+    if not channels:
+        return {"ok": True, "message": "no channels configured"}
+
+    notifier = AnnouncementNotifier(redis_client=redis)
+    msg = AnnouncementMessage(title=a.title, content=a.content, channels=channels)
+    results = await notifier.publish(msg)
+    _log(db, admin["admin_id"], "send", "announcement", str(announcement_id),
+         {"title": a.title}, {"results": results})
+    return {"ok": True, "results": results}
