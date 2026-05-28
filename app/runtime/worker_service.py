@@ -51,10 +51,12 @@ from app.runtime.trade_execution_service import RuntimeTradeExecutionService
 from app.runtime.worker_config import (
     AlertSettings,
     WorkerSettings,
+    apply_db_overrides,
     get_alert_settings,
     get_worker_settings,
     load_exchange_credentials_from_env,
     load_exchange_proxies_from_env,
+    load_platform_config_from_db,
 )
 from app.trading.risk_manager import RiskManager
 from app.trading.order_recorder import OrderRecorder
@@ -479,6 +481,13 @@ class WorkerApp:
         ):
             route_store = UserNodeRouteStore(redis_client)
             await route_store.sync_default_routes(self.settings.user_node_routes)
+
+        if self.settings.database_enabled and self.worker_factory is None:
+            session_factory = build_session_factory(self.settings.database_url)
+            db_config = await load_platform_config_from_db(session_factory)
+            if db_config:
+                apply_db_overrides(self.settings, db_config)
+
         factory = self.worker_factory or DefaultWorkerFactory(
             settings=self.settings,
             event_router=router,

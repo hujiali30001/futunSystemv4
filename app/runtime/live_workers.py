@@ -1237,11 +1237,12 @@ class ArbitrageExecutionTaskConsumer:
                 )
                 for exchange, oid in result.order_ids.items():
                     if exchange not in (getattr(result, "failed_exchanges", []) or []):
+                        real_eid = (result.exchange_order_ids or {}).get(exchange, "pending")
                         asyncio.create_task(
                             poller.poll_until_closed(
                                 order_id=oid,
                                 exchange=exchange,
-                                exchange_order_id="pending",
+                                exchange_order_id=real_eid,
                                 symbol=task.symbol,
                                 task_id=task.id if hasattr(task, "id") else 0,
                                 current_filled=0.0,

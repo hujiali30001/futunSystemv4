@@ -13,6 +13,7 @@ class ExecutionResult:
     failed_exchanges: list[str]
     failed_errors: list[str] | None = None
     order_ids: dict[str, int] | None = None
+    exchange_order_ids: dict[str, str] | None = None
 
 
 class TradeExecutor:
@@ -60,6 +61,7 @@ class TradeExecutor:
         filled_exchanges: list[str] = []
         failed_exchanges: list[str] = []
         failed_errors: list[str] = []
+        exchange_order_ids: dict[str, str] = {}
 
         for exchange, result in zip(exchanges, responses):
             if isinstance(result, Exception):
@@ -67,6 +69,9 @@ class TradeExecutor:
                 failed_errors.append(f"{exchange}: {result}")
             else:
                 filled_exchanges.append(exchange)
+                eid = str(result.get("id", ""))
+                if eid:
+                    exchange_order_ids[exchange] = eid
 
         status = "OPEN_HEDGED" if not failed_exchanges else "OPEN_PARTIAL"
         return ExecutionResult(
@@ -75,6 +80,7 @@ class TradeExecutor:
             failed_exchanges=failed_exchanges,
             failed_errors=failed_errors if failed_errors else None,
             order_ids=record_ids if record_ids else None,
+            exchange_order_ids=exchange_order_ids if exchange_order_ids else None,
         )
 
 

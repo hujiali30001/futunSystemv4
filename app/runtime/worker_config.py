@@ -185,3 +185,46 @@ def load_exchange_proxies_from_env(exchanges: list[str]) -> dict[str, dict[str, 
             password=password,
         )
     return proxies_by_exchange
+
+
+async def load_platform_config_from_db(session_factory) -> dict[str, str]:
+    session = session_factory()
+    try:
+        from models import PlatformConfig
+        rows = session.query(PlatformConfig).all()
+        return {r.config_key: r.config_value for r in rows if r.config_value}
+    finally:
+        session.close()
+
+
+_FIELD_MAP: dict[str, str] = {
+    "SPOT_EXCHANGES": "spot_exchanges",
+    "SPOT_SYMBOLS": "spot_symbols",
+    "SCANNER_POLL_INTERVAL_SECONDS": "scanner_poll_interval_seconds",
+    "ARB_SCANNER_POLL_INTERVAL_SECONDS": "arb_scanner_poll_interval_seconds",
+    "ORDERBOOK_DEPTH_LIMIT": "orderbook_depth_limit",
+    "TARGET_QUOTE_AMOUNT": "target_quote_amount",
+    "CONSUMER_BLOCK_MS": "consumer_block_ms",
+    "NODE_ID": "node_id",
+}
+
+
+def apply_db_overrides(settings: WorkerSettings, db_config: dict[str, str]) -> None:
+    for db_key, db_value in db_config.items():
+        field_name = _FIELD_MAP.get(db_key)
+        if field_name is None:
+            continue
+        if not hasattr(settings, field_name):
+            continue
+        parts = [v.strip() for v in db_value.split(",")]
+        current = getattr(settings, field_name)
+        if isinstance(current, list):
+            setattr(settings, field_name, parts)
+        elif isinstance(current, bool):
+            setattr(settings, field_name, db_value.lower() in ("true", "1", "yes"))
+        elif isinstance(current, int):
+            setattr(settings, field_name, int(parts[0]) if parts else 0)
+        elif isinstance(current, float):
+            setattr(settings, field_name, float(parts[0]) if parts else 0.0)
+        else:
+            setattr(settings, field_name, db_value)
