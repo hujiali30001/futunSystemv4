@@ -388,13 +388,23 @@ export interface ExchangeAccount {
   account_label: string
   env_mode: string
   api_key_masked: string
+  secret_masked: string
+  passphrase_masked: string
   secret_set: boolean
   passphrase_set: boolean
+}
+
+export interface SmtpSettings {
+  host: string
+  port: number
+  username: string
+  password: string
 }
 
 export interface UserSettings {
   email: string | null
   feishu_webhook_url: string | null
+  smtp: SmtpSettings
   exchange_accounts: ExchangeAccount[]
 }
 
@@ -406,8 +416,9 @@ export async function getSettings() {
 export async function updateProfile(body: {
   email: string | null
   feishu_webhook_url: string | null
+  smtp?: SmtpSettings
 }) {
-  const { data } = await api.patch<UserSettings>('/settings/profile', body)
+  const { data } = await api.put<UserSettings>('/settings/profile', body)
   return data
 }
 

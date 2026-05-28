@@ -11,9 +11,17 @@ EXCHANGES = ["binance", "okx", "bybit", "gate", "bitget"]
 router = APIRouter()
 
 
+class SmtpConfig(BaseModel):
+    host: str = ""
+    port: int = 465
+    username: str = ""
+    password: str = ""
+
+
 class ProfileUpdate(BaseModel):
     email: str | None = None
     feishu_webhook_url: str | None = None
+    smtp: SmtpConfig | None = None
 
 
 class ExchangeAccountCreate(BaseModel):
@@ -36,13 +44,16 @@ def get_settings(db: Session = Depends(get_db), user: dict = Depends(get_current
     return {
         "email": u.email,
         "feishu_webhook_url": u.feishu_webhook_url,
+        "smtp": u.smtp_config_json or {},
         "exchange_accounts": [
             {
                 "id": a.id,
                 "exchange": a.exchange,
                 "account_label": a.account_label,
                 "env_mode": a.env_mode,
-                "api_key_masked": a.api_key_ciphertext[:6] + "***" if a.api_key_ciphertext else "",
+                "api_key_masked": a.api_key_ciphertext[:6] + "***" + a.api_key_ciphertext[-3:] if a.api_key_ciphertext else "",
+                "secret_masked": "***" if a.secret_ciphertext else "",
+                "passphrase_masked": "***" if a.passphrase_ciphertext else "",
                 "secret_set": bool(a.secret_ciphertext),
                 "passphrase_set": bool(a.passphrase_ciphertext),
             }
@@ -62,6 +73,8 @@ def update_profile(
         u.email = body.email
     if body.feishu_webhook_url is not None:
         u.feishu_webhook_url = body.feishu_webhook_url
+    if body.smtp is not None:
+        u.smtp_config_json = body.smtp.model_dump()
     db.commit()
     return {"ok": True}
 
@@ -190,9 +203,14 @@ async def get_balances(
             assets: list[dict] = []
             ex_total = 0.0
             for currency, info in (balance.get("total") or {}).items():
-                free = float(info.get("free", 0) or 0)
-                used = float(info.get("used", 0) or 0)
-                total_amount = free + used
+                if isinstance(info, (int, float)):
+                    total_amount = float(info)
+                    free = total_amount
+                    used = 0.0
+                else:
+                    free = float(info.get("free", 0) or 0)
+                    used = float(info.get("used", 0) or 0)
+                    total_amount = free + used
                 if total_amount <= 1e-10:
                     continue
                 usdt_value = 0.0

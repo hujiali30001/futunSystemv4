@@ -7,6 +7,7 @@ import {
   deleteExchangeAccount,
   getBalances,
   type UserSettings,
+  type SmtpSettings,
   type BalancesData,
 } from '../api'
 
@@ -19,7 +20,10 @@ const TABS: { key: Tab; label: string; icon: string }[] = [
 ]
 
 const EXCHANGES = ['binance', 'okx', 'bybit', 'gate', 'bitget']
-const ENV_MODES = ['testnet', 'mainnet']
+const ENV_MODES: { value: string; label: string }[] = [
+  { value: 'testnet', label: '模拟盘' },
+  { value: 'mainnet', label: '实盘' },
+]
 
 export function SettingsPage() {
   const [tab, setTab] = useState<Tab>('notify')
@@ -27,6 +31,7 @@ export function SettingsPage() {
 
   const [email, setEmail] = useState('')
   const [feishu, setFeishu] = useState('')
+  const [smtp, setSmtp] = useState<SmtpSettings>({ host: '', port: 465, username: '', password: '' })
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState('')
 
@@ -46,6 +51,7 @@ export function SettingsPage() {
       setSettings(s)
       setEmail(s.email || '')
       setFeishu(s.feishu_webhook_url || '')
+      setSmtp(s.smtp || { host: '', port: 465, username: '', password: '' })
     })
   }, [])
 
@@ -68,8 +74,9 @@ export function SettingsPage() {
   const saveProfile = async () => {
     setSaving(true)
     try {
-      await updateProfile({ email: email || null, feishu_webhook_url: feishu || null })
+      await updateProfile({ email: email || null, feishu_webhook_url: feishu || null, smtp })
       showToast('通知设置已保存')
+      reloadSettings()
     } finally {
       setSaving(false)
     }
@@ -138,7 +145,7 @@ export function SettingsPage() {
         ))}
       </div>
 
-      {tab === 'notify' && <NotifyTab email={email} setEmail={setEmail} feishu={feishu} setFeishu={setFeishu} saving={saving} onSave={saveProfile} />}
+      {tab === 'notify' && <NotifyTab email={email} setEmail={setEmail} feishu={feishu} setFeishu={setFeishu} smtp={smtp} setSmtp={setSmtp} saving={saving} onSave={saveProfile} />}
       {tab === 'api' && <ApiTab settings={settings} editEx={editEx} setEditEx={setEditEx} exForm={exForm} setExForm={setExForm} onSave={handleExchangeSave} onDelete={handleDelete} />}
       {tab === 'balance' && <BalanceTab balances={balances} loadingBal={loadingBal} onRefresh={refreshBalance} />}
     </div>
@@ -146,35 +153,83 @@ export function SettingsPage() {
 }
 
 function NotifyTab({
-  email, setEmail, feishu, setFeishu, saving, onSave,
+  email, setEmail, feishu, setFeishu, smtp, setSmtp, saving, onSave,
 }: {
   email: string; setEmail: (v: string) => void
   feishu: string; setFeishu: (v: string) => void
+  smtp: SmtpSettings; setSmtp: (v: SmtpSettings) => void
   saving: boolean; onSave: () => void
 }) {
   return (
     <div className="rounded-lg border border-gray-800 bg-gray-900 p-5">
       <p className="mb-4 text-xs text-gray-500">配置通知渠道后，系统将在关键事件发生时向您推送通知。</p>
-      <div className="mb-4">
-        <label className="mb-1.5 block text-sm font-medium text-gray-300">邮箱地址</label>
-        <input
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:border-emerald-500 focus:outline-none"
-          placeholder="user@example.com"
-        />
-        <p className="mt-1 text-xs text-gray-600">用于接收开仓/平仓/风控通知</p>
+
+      <div className="mb-5 pb-5 border-b border-gray-800">
+        <h4 className="mb-3 text-sm font-medium text-gray-400">邮件通知</h4>
+        <div className="mb-3">
+          <label className="mb-1 block text-xs text-gray-500">接收邮箱</label>
+          <input
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:border-emerald-500 focus:outline-none"
+            placeholder="user@example.com"
+          />
+        </div>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-xs text-gray-500">SMTP 服务器</label>
+            <input
+              value={smtp.host}
+              onChange={(e) => setSmtp({ ...smtp, host: e.target.value })}
+              className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:border-emerald-500 focus:outline-none"
+              placeholder="smtp.qq.com"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-gray-500">端口</label>
+            <input
+              type="number"
+              value={smtp.port}
+              onChange={(e) => setSmtp({ ...smtp, port: Number(e.target.value) })}
+              className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:border-emerald-500 focus:outline-none"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-gray-500">SMTP 用户名</label>
+            <input
+              value={smtp.username}
+              onChange={(e) => setSmtp({ ...smtp, username: e.target.value })}
+              className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:border-emerald-500 focus:outline-none"
+              placeholder="你的邮箱地址"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-gray-500">SMTP 密码/授权码</label>
+            <input
+              type="password"
+              value={smtp.password}
+              onChange={(e) => setSmtp({ ...smtp, password: e.target.value })}
+              className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:border-emerald-500 focus:outline-none"
+              placeholder="16位授权码"
+            />
+          </div>
+        </div>
       </div>
+
       <div className="mb-5">
-        <label className="mb-1.5 block text-sm font-medium text-gray-300">飞书 Webhook URL</label>
-        <input
-          value={feishu}
-          onChange={(e) => setFeishu(e.target.value)}
-          className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:border-emerald-500 focus:outline-none"
-          placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..."
-        />
-        <p className="mt-1 text-xs text-gray-600">创建飞书群机器人 → 复制 Webhook 地址</p>
+        <h4 className="mb-3 text-sm font-medium text-gray-400">飞书通知</h4>
+        <div>
+          <label className="mb-1 block text-xs text-gray-500">飞书 Webhook URL</label>
+          <input
+            value={feishu}
+            onChange={(e) => setFeishu(e.target.value)}
+            className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:border-emerald-500 focus:outline-none"
+            placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..."
+          />
+          <p className="mt-1 text-xs text-gray-600">创建飞书群机器人 → 复制 Webhook 地址</p>
+        </div>
       </div>
+
       <button
         onClick={onSave}
         disabled={saving}
@@ -198,7 +253,7 @@ function ApiTab({
   return (
     <div className="rounded-lg border border-gray-800 bg-gray-900 p-5">
       <p className="mb-4 text-xs text-gray-500">
-        添加交易所 API Key 后即可进行自动交易和资产查询。建议使用只设置交易权限的子账户。
+        添加交易所 API Key 后即可进行自动交易和资产查询。建议使用子账户并开通交易权限。
       </p>
       {EXCHANGES.map((ex) => {
         const acct = settings.exchange_accounts.find((a) => a.exchange === ex)
@@ -209,19 +264,22 @@ function ApiTab({
               <div className="flex items-center gap-3">
                 <span className="text-sm font-medium uppercase text-gray-200">{ex}</span>
                 {acct && !editing && (
-                  <span className="rounded bg-gray-800 px-2 py-0.5 text-xs text-gray-400">{acct.env_mode}</span>
+                  <>
+                    <span className="rounded bg-gray-800 px-2 py-0.5 text-xs text-gray-400">
+                      {acct.env_mode === 'testnet' ? '模拟盘' : '实盘'}
+                    </span>
+                    <span className="text-xs text-gray-600">{acct.api_key_masked}</span>
+                  </>
                 )}
               </div>
               <div className="flex items-center gap-2">
-                {!editing && (
-                  <span className="text-xs text-gray-500">
-                    {acct ? acct.api_key_masked : '未配置'}
-                  </span>
+                {!acct && !editing && (
+                  <span className="text-xs text-gray-600">未配置</span>
                 )}
                 <button
                   onClick={() => {
-                    setEditEx(editing ? null : ex)
-                    if (editing) return
+                    if (editing) { setEditEx(null); return }
+                    setEditEx(ex)
                     setExForm({
                       api_key: '',
                       secret: '',
@@ -246,20 +304,30 @@ function ApiTab({
 
             {editing && (
               <div className="mt-3 space-y-3">
+                {acct && (
+                  <div className="rounded bg-gray-800/70 px-3 py-2 text-xs text-gray-400">
+                    <span>当前：Key {acct.api_key_masked}</span>
+                    {acct.secret_masked && <span className="ml-3">Secret {acct.secret_masked}</span>}
+                    {acct.passphrase_masked && <span className="ml-3">Passphrase {acct.passphrase_masked}</span>}
+                    <span className="ml-3">· {acct.env_mode === 'testnet' ? '模拟盘' : '实盘'}</span>
+                    <p className="mt-1 text-gray-600">下方填写新 Key 将覆盖当前配置</p>
+                  </div>
+                )}
                 <div>
-                  <label className="mb-1 block text-xs text-gray-500">环境模式</label>
+                  <label className="mb-1 block text-xs text-gray-500">环境</label>
                   <div className="flex gap-2">
                     {ENV_MODES.map((mode) => (
                       <button
-                        key={mode}
-                        onClick={() => setExForm({ ...exForm, env_mode: mode })}
+                        key={mode.value}
+                        type="button"
+                        onClick={() => setExForm({ ...exForm, env_mode: mode.value })}
                         className={`rounded px-3 py-1 text-xs font-medium border ${
-                          exForm.env_mode === mode
+                          exForm.env_mode === mode.value
                             ? 'border-emerald-600 bg-emerald-900/50 text-emerald-400'
                             : 'border-gray-700 text-gray-500 hover:text-gray-300'
                         }`}
                       >
-                        {mode === 'testnet' ? '测试网' : '主网'}
+                        {mode.label}
                       </button>
                     ))}
                   </div>
@@ -271,7 +339,7 @@ function ApiTab({
                       value={exForm.api_key}
                       onChange={(e) => setExForm({ ...exForm, api_key: e.target.value })}
                       className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:border-emerald-500 focus:outline-none"
-                      placeholder="输入 API Key"
+                      placeholder={acct ? '留空则不修改' : '输入 API Key'}
                     />
                   </div>
                   <div>
@@ -281,7 +349,7 @@ function ApiTab({
                       value={exForm.secret}
                       onChange={(e) => setExForm({ ...exForm, secret: e.target.value })}
                       className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:border-emerald-500 focus:outline-none"
-                      placeholder="输入 Secret"
+                      placeholder={acct ? '留空则不修改' : '输入 Secret'}
                     />
                   </div>
                   <div>
@@ -291,7 +359,7 @@ function ApiTab({
                       value={exForm.passphrase}
                       onChange={(e) => setExForm({ ...exForm, passphrase: e.target.value })}
                       className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:border-emerald-500 focus:outline-none"
-                      placeholder={ex === 'okx' ? 'OKX 必须填写 Passphrase' : '可选'}
+                      placeholder={acct ? '留空则不修改' : ex === 'okx' ? 'OKX 必填 Passphrase' : '可选'}
                     />
                   </div>
                 </div>

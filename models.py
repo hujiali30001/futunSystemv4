@@ -39,6 +39,7 @@ class User(TimestampMixin, Base):
     is_trading_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     feishu_webhook_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    smtp_config_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     node_id: Mapped[str] = mapped_column(String(64), default="main")
 
 
