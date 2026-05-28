@@ -39,6 +39,7 @@ class User(TimestampMixin, Base):
     is_trading_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     feishu_webhook_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    node_id: Mapped[str] = mapped_column(String(64), default="main")
 
 
 class Proxy(TimestampMixin, Base):
@@ -268,3 +269,14 @@ class PositionSnapshot(TimestampMixin, Base):
     unrealized_pnl: Mapped[float | None] = mapped_column(Float, nullable=True)
     realized_pnl: Mapped[float | None] = mapped_column(Float, nullable=True)
     funding_fee_accrued: Mapped[float] = mapped_column(Float, default=0.0)
+
+
+class PlatformConfig(TimestampMixin, Base):
+    __tablename__ = "platform_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    config_key: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    config_value: Mapped[str] = mapped_column(Text, nullable=False)
+    config_type: Mapped[str] = mapped_column(String(32), default="string")
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_by: Mapped[int | None] = mapped_column(ForeignKey("admin_users.id"), nullable=True)

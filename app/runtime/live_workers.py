@@ -1001,6 +1001,19 @@ class ArbitrageExecutionTaskConsumer:
             return derivative_exchange, spot_exchange
         raise ValueError(f"unsupported task_type: {task.task_type}")
 
+    def _is_user_trading_enabled(self, user_id: int) -> bool:
+        try:
+            session = self.account_repository.session if self.account_repository else None
+            if session is None:
+                return True
+            from models import User
+            user = session.query(User).filter(
+                User.id == user_id, User.is_trading_enabled.is_(True)
+            ).first()
+            return user is not None
+        except Exception:
+            return True
+
     def _build_execution_accounts(self, task) -> dict[str, Any]:
         accounts = list(
             self.account_repository.list_enabled_accounts(
@@ -1195,6 +1208,12 @@ class ArbitrageExecutionTaskConsumer:
             env_mode=self.env_mode,
         )
         if task is None:
+            return 0
+        if not self._is_user_trading_enabled(int(task.user_id)):
+            self.task_repository.mark_failed(
+                task_uuid=str(task.task_uuid),
+                reason="user_trading_disabled",
+            )
             return 0
         try:
             execution_accounts = self._build_execution_accounts(task)
@@ -1758,6 +1777,18 @@ class RedisArbitrageTaskDispatcher:
         )
         return list(accounts or [])
 
+    def _get_user_node(self, *, user_id: str, payload: dict[str, Any]) -> str:
+        if self.dispatch_user_repository is None:
+            return "main"
+        session = getattr(self.dispatch_user_repository, "session", None)
+        if session is None:
+            return "main"
+        from models import User
+        user = session.query(User).filter(User.id == int(user_id)).first()
+        if user is None:
+            return "main"
+        return str(user.node_id) if user.node_id else "main"
+
     def _has_required_account_coverage(
         self, *, payload: dict[str, Any], accounts: list[Any] | None
     ) -> bool:
@@ -1864,7 +1895,7 @@ class RedisArbitrageTaskDispatcher:
                         payload.get("source_message_id", message_id)
                     )
                     for user_id in self._resolve_candidate_user_ids():
-                        node_id = await self.route_resolver.get_user_node(user_id)
+                        node_id = self._get_user_node(user_id=user_id, payload=effective_payload)
                         if node_id is None:
                             if self.event_router is not None:
                                 await self.event_router.dispatch(

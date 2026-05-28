@@ -17,7 +17,7 @@ export function AdminUsersPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-800 bg-gray-900 text-left text-gray-400">
-                <th className="px-3 py-2">ID</th><th className="px-3 py-2">用户名</th><th className="px-3 py-2">状态</th><th className="px-3 py-2">交易</th>
+                <th className="px-3 py-2">ID</th><th className="px-3 py-2">用户名</th><th className="px-3 py-2">状态</th><th className="px-3 py-2">节点</th><th className="px-3 py-2">交易</th>
               </tr>
             </thead>
             <tbody>
@@ -26,6 +26,7 @@ export function AdminUsersPage() {
                   <td className="px-3 py-2 text-gray-400">{u.id}</td>
                   <td className="px-3 py-2">{u.username}</td>
                   <td className="px-3 py-2">{u.status}</td>
+                  <td className="px-3 py-2 text-xs text-gray-400">{u.node_id || 'main'}</td>
                   <td className="px-3 py-2">{u.is_trading_enabled ? '✓' : '✗'}</td>
                 </tr>
               ))}

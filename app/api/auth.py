@@ -85,4 +85,23 @@ def me(current_user: dict = Depends(get_current_user), db: Session = Depends(get
         "username": user.username,
         "status": user.status,
         "is_trading_enabled": user.is_trading_enabled,
+        "node_id": user.node_id,
     }
+
+
+class TradeToggleResponse(BaseModel):
+    is_trading_enabled: bool
+
+
+@router.patch("/me/trade-toggle", response_model=TradeToggleResponse)
+def trade_toggle(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    user = db.query(User).filter(User.id == current_user["user_id"]).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.is_trading_enabled = not user.is_trading_enabled
+    db.commit()
+    db.refresh(user)
+    return TradeToggleResponse(is_trading_enabled=user.is_trading_enabled)

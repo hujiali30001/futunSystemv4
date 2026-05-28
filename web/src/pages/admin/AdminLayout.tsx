@@ -8,6 +8,7 @@ const MENU = [
   { path: '/admin/announcements', label: '公告管理', roles: ['superadmin', 'ops_admin'] },
   { path: '/admin/audit', label: '审计日志', roles: ['superadmin'] },
   { path: '/admin/users', label: '用户管理', roles: ['superadmin', 'ops_admin'] },
+  { path: '/admin/configs', label: '平台配置', roles: ['superadmin'] },
 ]
 
 export function AdminLayout() {

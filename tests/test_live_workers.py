@@ -353,10 +353,59 @@ class FakeStrategyConfigRepository:
         return list(self.strategies)
 
 
+class FakeUser:
+    def __init__(self, *, id: int, node_id: str | None = None):
+        self.id = id
+        self.node_id = node_id
+
+
+class FakeSession:
+    def __init__(self, users_by_id: dict[int, FakeUser] | None = None):
+        self.users_by_id = users_by_id or {}
+
+    def query(self, model):
+        return FakeQuery(self.users_by_id, model)
+
+
+class FakeQuery:
+    def __init__(self, users_by_id: dict[int, FakeUser], model):
+        self.users_by_id = users_by_id
+        self.model = model
+        self.filters = []
+
+    def filter(self, condition):
+        self.filters.append(condition)
+        return self
+
+    def first(self):
+        for user in self.users_by_id.values():
+            match = True
+            for f in self.filters:
+                if not self._eval_filter(f, user):
+                    match = False
+                    break
+            if match:
+                return user
+        return None
+
+    @staticmethod
+    def _eval_filter(condition, user):
+        left = getattr(user, condition.left.key, None)
+        right = condition.right.value
+        return left == right
+
+
 class FakeDispatchUserRepository:
-    def __init__(self, user_ids):
+    def __init__(self, user_ids, node_ids: dict[str, str] | None = None):
         self.user_ids = list(user_ids)
         self.calls = []
+        self.session = None
+        if node_ids:
+            users = {
+                int(uid): FakeUser(id=int(uid), node_id=nid)
+                for uid, nid in node_ids.items()
+            }
+            self.session = FakeSession(users)
 
     def list_dispatchable_user_ids(self, *, env_mode: str) -> list[str]:
         self.calls.append({"env_mode": env_mode})
@@ -1392,7 +1441,7 @@ async def test_arbitrage_dispatcher_emits_user_discovered_and_task_created_event
     dispatcher = RedisArbitrageTaskDispatcher(
         redis_client=redis_client,
         user_ids=[],
-        dispatch_user_repository=FakeDispatchUserRepository(["42"]),
+        dispatch_user_repository=FakeDispatchUserRepository(["42"], node_ids={"42": "node-a"}),
         route_resolver=UserNodeRouter(redis_client),
         task_repository=repository,
         strategy_repository=FakeStrategyConfigRepository(

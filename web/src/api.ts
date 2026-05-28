@@ -47,6 +47,7 @@ export interface UserInfo {
   username: string
   status: string
   is_trading_enabled: boolean
+  node_id?: string
 }
 
 export interface LeaderboardRow {
@@ -404,3 +405,13 @@ export async function updateExchangeAccount(
 export async function deleteExchangeAccount(id: number) {
   await api.delete(`/settings/exchange-accounts/${id}`)
 }
+
+export interface TradeToggleResponse {
+  is_trading_enabled: boolean
+}
+
+export function tradeToggle(): Promise<TradeToggleResponse> {
+  return api.patch('/auth/me/trade-toggle').then((res) => res.data)
+}
+
+export { api }

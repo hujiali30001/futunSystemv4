@@ -14,6 +14,7 @@ import { SwitchesPage } from './pages/admin/SwitchesPage'
 import { AnnouncementsPage } from './pages/admin/AnnouncementsPage'
 import { AuditPage } from './pages/admin/AuditPage'
 import { AdminUsersPage } from './pages/admin/UsersPage'
+import { ConfigsPage } from './pages/admin/ConfigsPage'
 
 export default function App() {
   return (
@@ -29,6 +30,7 @@ export default function App() {
                 <Route path="announcements" element={<AnnouncementsPage />} />
                 <Route path="audit" element={<AuditPage />} />
                 <Route path="users" element={<AdminUsersPage />} />
+                <Route path="configs" element={<ConfigsPage />} />
               </Route>
             </Routes>
           </div>

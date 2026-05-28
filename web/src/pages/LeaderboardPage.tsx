@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getLeaderboard, type LeaderboardRow } from '../api'
+import { TradeStatusCard } from '../components/TradeStatusCard'
 
 type Direction = 'spot_futures' | 'futures_spot'
 
@@ -34,6 +35,8 @@ export function LeaderboardPage() {
   const navigate = useNavigate()
   const token = localStorage.getItem('token')
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [tradingEnabled, setTradingEnabled] = useState(false)
+  const [userNodeId, setUserNodeId] = useState('')
 
   const pinKey = (r: LeaderboardRow) =>
     `${r.full_symbol}|${r.spot_exchange}|${r.derivative_exchange}`
@@ -121,6 +124,18 @@ export function LeaderboardPage() {
     setPage(1)
   }, [search, minVolume, minFunding, direction])
 
+  useEffect(() => {
+    if (!token) return
+    import('axios').then(({ default: axios }) => {
+      axios.get('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } })
+        .then((res: any) => {
+          setTradingEnabled(res.data.is_trading_enabled)
+          setUserNodeId(res.data.node_id || '')
+        })
+        .catch(() => {})
+    })
+  }, [token])
+
   const handleStart = (row: LeaderboardRow) => {
     const params = new URLSearchParams({
       symbol: row.full_symbol,
@@ -142,6 +157,13 @@ export function LeaderboardPage() {
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-6">
+      {token && (
+        <TradeStatusCard
+          isTradingEnabled={tradingEnabled}
+          nodeId={userNodeId}
+        />
+      )}
+
       <div className="mb-4 flex items-center gap-6">
         <button
           onClick={() => switchDir('spot_futures')}
