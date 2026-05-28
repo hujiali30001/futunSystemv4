@@ -188,7 +188,6 @@ async def get_balances(
                     session.client.fetch_balance(),
                     timeout=BALANCE_TIMEOUT,
                 )
-                await session.close()
             except asyncio.TimeoutError:
                 await session.close()
                 return {"exchange": acct.exchange, "env_mode": acct.env_mode, "error": "timeout", "assets": [], "total_usdt": 0}
@@ -196,8 +195,8 @@ async def get_balances(
                 await session.close()
                 raise
 
-            assets: list[dict] = []
-            ex_total = 0.0
+            non_usdt: list[str] = []
+            assets_raw: list[dict] = []
             for currency, info in (balance.get("total") or {}).items():
                 if isinstance(info, (int, float)):
                     total_amount = float(info)
@@ -212,15 +211,32 @@ async def get_balances(
                 if currency in ("USDT", "USD"):
                     usdt_value = total_amount
                 else:
-                    usdt_value = await _get_usdt_price(factory, acct.exchange, acct.env_mode, currency, total_amount)
-                ex_total += usdt_value
-                assets.append({
-                    "currency": currency, "free": round(free, 8),
-                    "used": round(used, 8), "total": round(total_amount, 8),
-                    "usdt_value": round(usdt_value, 2),
-                })
+                    usdt_value = 0.0
+                    if total_amount > 0:
+                        non_usdt.append(currency)
+                assets_raw.append({"currency": currency, "free": round(free, 8), "used": round(used, 8), "total": round(total_amount, 8), "usdt_value": round(usdt_value, 2)})
 
+            if non_usdt:
+                try:
+                    symbols = [f"{c}/USDT" for c in non_usdt]
+                    tickers = await asyncio.wait_for(
+                        session.client.fetch_tickers(symbols),
+                        timeout=BALANCE_TIMEOUT,
+                    )
+                    for a in assets_raw:
+                        if a["currency"] in ("USDT", "USD"):
+                            continue
+                        ticker = tickers.get(f"{a['currency']}/USDT", {})
+                        price = float(ticker.get("last", 0) or 0)
+                        a["usdt_value"] = round(price * a["total"], 2)
+                except Exception:
+                    pass
+
+            await session.close()
+
+            assets = [a for a in assets_raw if a["usdt_value"] > 0.005]
             assets.sort(key=lambda a: a["usdt_value"], reverse=True)
+            ex_total = sum(a["usdt_value"] for a in assets)
             return {"exchange": acct.exchange, "env_mode": acct.env_mode, "error": None, "assets": assets, "total_usdt": round(ex_total, 2)}
         except Exception as exc:
             return {"exchange": acct.exchange, "env_mode": acct.env_mode, "error": str(exc)[:200], "assets": [], "total_usdt": 0}
@@ -230,34 +246,3 @@ async def get_balances(
     exchange_balances = sorted(results, key=lambda e: e["total_usdt"], reverse=True)
     total_usdt = sum(e["total_usdt"] for e in exchange_balances)
     return {"exchanges": exchange_balances, "total_usdt": round(total_usdt, 2)}
-
-
-_PRICE_CACHE: dict[str, float] = {}
-
-
-async def _get_usdt_price(
-    factory: ExchangeClientFactory,
-    exchange: str,
-    env_mode: str,
-    currency: str,
-    amount: float,
-) -> float:
-    cache_key = f"{exchange}:{currency}"
-    if cache_key in _PRICE_CACHE:
-        return _PRICE_CACHE[cache_key] * amount
-
-    symbol = f"{currency}/USDT"
-    try:
-        session = factory.create_session(
-            exchange=exchange,
-            env_mode=env_mode,
-            proxies={},
-        )
-        ticker = await session.client.fetch_ticker(symbol)
-        price = float(ticker.get("last", 0) or 0)
-        await session.close()
-    except Exception:
-        price = 0.0
-
-    _PRICE_CACHE[cache_key] = price
-    return price * amount
