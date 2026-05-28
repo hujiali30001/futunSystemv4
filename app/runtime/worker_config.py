@@ -55,8 +55,12 @@ class WorkerSettings(BaseSettings):
     control_admin_bind_host: str = "127.0.0.1"
     control_admin_port: int = 8788
     control_admin_token: str = ""
+    encryption_key: str = ""
 
-    @field_validator("spot_symbols", "spot_exchanges", "dispatch_user_ids", "spot_symbols_auto_quote", mode="before")
+    @field_validator(
+        "spot_symbols", "spot_exchanges", "dispatch_user_ids",
+        "spot_symbols_auto_quote", mode="before"
+    )
     @classmethod
     def split_csv(cls, value: str | list[str]) -> str | list[str]:
         if isinstance(value, str):

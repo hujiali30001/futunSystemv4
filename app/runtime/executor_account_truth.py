@@ -1,4 +1,9 @@
+import base64
+import hashlib
+import os
 from dataclasses import dataclass
+
+from cryptography.fernet import Fernet
 
 from app.exchanges.session_manager import ExchangeCredentials, build_proxy_urls
 from app.runtime.live_workers import _normalize_account_region, _parse_market_type_scope
@@ -18,6 +23,29 @@ class ResolvedExecutionAccount:
     exchange: str
     credentials: ExchangeCredentials
     proxies: dict[str, str]
+
+
+def _derive_fernet_key(secret: str) -> bytes:
+    raw = hashlib.sha256(secret.encode()).digest()
+    return base64.urlsafe_b64encode(raw)
+
+
+class SecretCipher:
+    def __init__(self, encryption_key: str) -> None:
+        self._fernet = Fernet(_derive_fernet_key(encryption_key))
+
+    def encrypt(self, plaintext: str | None) -> str | None:
+        if plaintext is None:
+            return None
+        return self._fernet.encrypt(plaintext.encode()).decode()
+
+    def decrypt(self, ciphertext: str | None) -> str | None:
+        if ciphertext is None:
+            return None
+        try:
+            return self._fernet.decrypt(ciphertext.encode()).decode()
+        except Exception:
+            return ciphertext
 
 
 class PassthroughSecretCipher:

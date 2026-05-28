@@ -19,7 +19,10 @@ from app.runtime.alerting import (
     StructuredEventLogger,
 )
 from app.runtime.arbitrage_execution_adapter import ArbitrageExecutionAdapter
-from app.runtime.executor_account_truth import ExecutorAccountTruthResolver
+from app.runtime.executor_account_truth import (
+    ExecutorAccountTruthResolver,
+    SecretCipher,
+)
 from app.runtime.live_arbitrage_flow import (
     LiveArbitrageFlowService,
     SwapSymbolDiscovery,
@@ -334,7 +337,8 @@ class DefaultWorkerFactory:
             session = session_factory()
             task_repository = TaskRepository(session)
             account_repository = AccountRepository(session)
-            account_truth_resolver = ExecutorAccountTruthResolver()
+            cipher = SecretCipher(self.settings.encryption_key) if self.settings.encryption_key else None
+            account_truth_resolver = ExecutorAccountTruthResolver(secret_cipher=cipher)
         consumer = RedisExecutionTaskConsumer(
             redis_client=redis_client,
             dispatcher=dispatcher,

@@ -8,9 +8,20 @@ from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from app.db.session import build_session_factory
+from app.runtime.executor_account_truth import SecretCipher
 
 SECRET_KEY = os.getenv("JWT_SECRET_KEY", "furun-dev-secret-change-in-production")
+ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", SECRET_KEY)
 ALGORITHM = "HS256"
+
+_cipher: SecretCipher | None = None
+
+
+def get_cipher() -> SecretCipher:
+    global _cipher
+    if _cipher is None:
+        _cipher = SecretCipher(ENCRYPTION_KEY)
+    return _cipher
 
 _session_factory = build_session_factory(os.getenv("DATABASE_URL", "sqlite:///./furun.db"))
 _redis: aioredis.Redis | None = None

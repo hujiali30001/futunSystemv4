@@ -370,8 +370,11 @@ export async function getPositions(params: { page?: number; page_size?: number }
 export interface ExchangeAccount {
   id: number
   exchange: string
-  api_key: string
   account_label: string
+  env_mode: string
+  api_key_masked: string
+  secret_set: boolean
+  passphrase_set: boolean
 }
 
 export interface UserSettings {

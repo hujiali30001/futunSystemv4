@@ -89,16 +89,16 @@ export function SettingsPage() {
               <div className="flex items-center justify-between">
                 <span className="font-mono text-sm text-gray-300">{ex}</span>
                 <span className="text-xs text-gray-500">
-                  {acct ? `已配置 (${acct.account_label})` : '未配置'}
+                  {acct ? `${acct.api_key_masked} | ${acct.env_mode}` : '未配置'}
                 </span>
                 <button
                   onClick={() => {
                     setEditEx(editing ? null : ex)
-                    if (acct) setExForm({ api_key: '', secret: '', passphrase: '' })
+                    setExForm({ api_key: '', secret: '', passphrase: '' })
                   }}
                   className="text-xs text-gray-400 hover:text-white"
                 >
-                  {editing ? '取消' : acct ? '编辑' : '添加'}
+                  {editing ? '取消' : acct ? '修改' : '添加'}
                 </button>
                 {acct && (
                   <button

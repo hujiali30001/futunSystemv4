@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from app.api.deps import get_db, get_current_user
+from app.api.deps import get_cipher, get_db, get_current_user
+from app.runtime.executor_account_truth import SecretCipher
 from models import User, ExchangeAccount
 
 router = APIRouter()
@@ -32,7 +33,18 @@ def get_settings(db: Session = Depends(get_db), user: dict = Depends(get_current
     return {
         "email": u.email,
         "feishu_webhook_url": u.feishu_webhook_url,
-        "exchange_accounts": accounts,
+        "exchange_accounts": [
+            {
+                "id": a.id,
+                "exchange": a.exchange,
+                "account_label": a.account_label,
+                "env_mode": a.env_mode,
+                "api_key_masked": a.api_key_ciphertext[:6] + "***" if a.api_key_ciphertext else "",
+                "secret_set": bool(a.secret_ciphertext),
+                "passphrase_set": bool(a.passphrase_ciphertext),
+            }
+            for a in accounts
+        ],
     }
 
 
@@ -56,15 +68,16 @@ def create_exchange_account(
     body: ExchangeAccountCreate,
     db: Session = Depends(get_db),
     user: dict = Depends(get_current_user),
+    cipher: SecretCipher = Depends(get_cipher),
 ):
     acct = ExchangeAccount(
         user_id=user["user_id"],
         exchange=body.exchange,
         account_label=body.account_label,
         env_mode=body.env_mode,
-        api_key_ciphertext=body.api_key,
-        secret_ciphertext=body.secret,
-        passphrase_ciphertext=body.passphrase,
+        api_key_ciphertext=cipher.encrypt(body.api_key),
+        secret_ciphertext=cipher.encrypt(body.secret),
+        passphrase_ciphertext=cipher.encrypt(body.passphrase),
     )
     db.add(acct)
     db.commit()
@@ -78,6 +91,7 @@ def update_exchange_account(
     body: ExchangeAccountCreate,
     db: Session = Depends(get_db),
     user: dict = Depends(get_current_user),
+    cipher: SecretCipher = Depends(get_cipher),
 ):
     acct = (
         db.query(ExchangeAccount)
@@ -89,9 +103,9 @@ def update_exchange_account(
     )
     if not acct:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
-    acct.api_key_ciphertext = body.api_key
-    acct.secret_ciphertext = body.secret
-    acct.passphrase_ciphertext = body.passphrase
+    acct.api_key_ciphertext = cipher.encrypt(body.api_key)
+    acct.secret_ciphertext = cipher.encrypt(body.secret)
+    acct.passphrase_ciphertext = cipher.encrypt(body.passphrase)
     acct.exchange = body.exchange
     acct.account_label = body.account_label
     db.commit()
