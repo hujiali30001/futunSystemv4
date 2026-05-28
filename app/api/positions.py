@@ -1,5 +1,8 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import func
+from datetime import datetime, timedelta
+
 from app.api.deps import get_db, get_current_user
 from models import ArbitrageTask, OrderRecord, FillRecord, PositionSnapshot
 
@@ -61,3 +64,59 @@ def list_positions(
         })
 
     return {"items": result_items, "total": total, "page": page, "page_size": page_size}
+
+
+@router.get("/positions/pnl-history")
+def pnl_history(
+    days: int = Query(30, ge=1, le=365),
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    cutoff = datetime.utcnow() - timedelta(days=days)
+
+    closed = (
+        db.query(ArbitrageTask)
+        .filter(
+            ArbitrageTask.user_id == user["user_id"],
+            ArbitrageTask.status == "CLOSED",
+            ArbitrageTask.finished_at >= cutoff,
+            ArbitrageTask.realized_pnl != None,
+        )
+        .all()
+    )
+
+    daily_pnl: dict[str, float] = {}
+    for task in closed:
+        day = task.finished_at.strftime("%Y-%m-%d") if task.finished_at else None
+        if day and task.realized_pnl is not None:
+            daily_pnl[day] = daily_pnl.get(day, 0) + float(task.realized_pnl)
+
+    fee_sums = (
+        db.query(
+            func.date(FillRecord.created_at).label("day"),
+            func.sum(FillRecord.fee_cost).label("total_fee"),
+        )
+        .join(ArbitrageTask, FillRecord.task_id == ArbitrageTask.id)
+        .filter(
+            ArbitrageTask.user_id == user["user_id"],
+            FillRecord.created_at >= cutoff,
+            FillRecord.fee_cost != None,
+        )
+        .group_by("day")
+        .order_by("day")
+        .all()
+    )
+
+    fee_by_day: dict[str, float] = {}
+    for row in fee_sums:
+        fee_by_day[str(row.day)] = float(row.total_fee or 0)
+
+    all_dates = sorted(set(list(daily_pnl.keys()) + list(fee_by_day.keys())))
+
+    cumulative = 0.0
+    points = []
+    for d in all_dates:
+        cumulative += daily_pnl.get(d, 0) - fee_by_day.get(d, 0)
+        points.append({"date": d, "cumulative_pnl": round(cumulative, 2)})
+
+    return {"points": points, "total_realized_pnl": round(cumulative, 2)}

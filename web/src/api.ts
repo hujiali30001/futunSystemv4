@@ -372,6 +372,16 @@ export async function getPositions(params: { page?: number; page_size?: number }
   return data
 }
 
+export interface PnlPoint {
+  date: string
+  cumulative_pnl: number
+}
+
+export async function getPnlHistory(days: number = 30) {
+  const { data } = await api.get<{ points: PnlPoint[]; total_realized_pnl: number }>('/positions/pnl-history', { params: { days } })
+  return data
+}
+
 export interface ExchangeAccount {
   id: number
   exchange: string
