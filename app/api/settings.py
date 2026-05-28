@@ -257,6 +257,7 @@ async def get_balances(
 
 class LiquidateRequest(BaseModel):
     exchanges: list[str] | None = None
+    targets: list[dict] | None = None
 
 
 @router.post("/settings/liquidate")
@@ -270,91 +271,41 @@ async def liquidate_all(
     if not accounts:
         return {"orders": [], "summary": {"total_sold_usdt": 0, "orders_placed": 0, "errors": 0}}
 
-    factory = ExchangeClientFactory()
     LIQUIDATE_TIMEOUT = 30
 
-    async def _liquidate_one(acct) -> dict:
+    target_accounts = [a for a in accounts if body.exchanges is None or a.exchange in body.exchanges]
+
+    all_results = []
+    for acct in target_accounts:
         ex_results: list[dict] = []
         ex_name = acct.exchange
         try:
-            api_key = cipher.decrypt(acct.api_key_ciphertext)
-            secret = cipher.decrypt(acct.secret_ciphertext)
-            if not api_key or not secret:
-                return {"exchange": ex_name, "env_mode": acct.env_mode, "error": "missing credentials", "orders": []}
+            k = cipher.decrypt(acct.api_key_ciphertext)
+            s_key = cipher.decrypt(acct.secret_ciphertext)
+            if not k or not s_key:
+                all_results.append({"exchange": ex_name, "env_mode": acct.env_mode, "error": "missing credentials", "orders": []})
+                continue
+            creds = ExchangeCredentials(api_key=k, secret=s_key, password=cipher.decrypt(acct.passphrase_ciphertext))
 
-            creds = ExchangeCredentials(api_key=api_key, secret=secret, password=cipher.decrypt(acct.passphrase_ciphertext))
-            session = factory.create_session(exchange=ex_name, env_mode=acct.env_mode, proxies={}, credentials=creds)
+            s = ExchangeClientFactory().create_session(exchange=ex_name, env_mode=acct.env_mode, proxies={}, credentials=creds)
+            await asyncio.wait_for(s.client.load_markets(), timeout=LIQUIDATE_TIMEOUT)
+            bal = await asyncio.wait_for(s.client.fetch_balance(), timeout=LIQUIDATE_TIMEOUT)
 
-            markets_session = factory.create_session(exchange=ex_name, env_mode=acct.env_mode, proxies={})
-            try:
-                await asyncio.wait_for(markets_session.client.load_markets(), timeout=LIQUIDATE_TIMEOUT)
-                markets = dict(markets_session.client.markets)
-            finally:
-                await markets_session.close()
-
-            try:
-                bal = await asyncio.wait_for(session.client.fetch_balance(), timeout=LIQUIDATE_TIMEOUT)
-            except asyncio.TimeoutError:
-                await session.close()
-                return {"exchange": ex_name, "env_mode": acct.env_mode, "error": "timeout", "orders": []}
-
-            holdings: list[tuple[str, float, float]] = []
             for currency, info in (bal.get("total") or {}).items():
-                if isinstance(info, (int, float)):
-                    total_amount = float(info)
-                    free_amount = total_amount
-                else:
-                    total_amount = float(info.get("total", 0) or 0)
-                    free_amount = float(info.get("free", total_amount) or 0)
-                if total_amount <= 1e-8 or currency in ("USDT", "USD"):
+                amt = float(info) if isinstance(info, (int, float)) else float(info.get("free", 0) or 0)
+                if amt <= 0 or currency in ("USDT", "USD"):
                     continue
-                sell_amount = free_amount if free_amount > 1e-8 else total_amount
-                holdings.append((currency, total_amount, sell_amount))
-
-            if not holdings:
-                await session.close()
-                return {"exchange": ex_name, "env_mode": acct.env_mode, "error": None, "orders": []}
-
-            session.client.markets = markets
-
-            for currency, total_amount, sell_amount in holdings:
                 symbol = f"{currency}/USDT"
-                market = markets.get(symbol)
-                if market is None:
-                    ex_results.append({"symbol": symbol, "status": "skipped", "reason": "no market"})
-                    continue
-
-                limits = market.get("limits", {}).get("amount", {})
-                min_amount = float(limits.get("min", 0) or 0)
-                if sell_amount < min_amount and min_amount > 0:
-                    ex_results.append({"symbol": symbol, "status": "skipped", "reason": f"{sell_amount:.8f} < min {min_amount}"})
-                    continue
-
                 try:
-                    ticker = await asyncio.wait_for(session.client.fetch_ticker(symbol), timeout=10)
-                    price = float(ticker.get("last", 0) or 0)
-                    if price <= 0:
-                        ex_results.append({"symbol": symbol, "status": "skipped", "reason": "no price"})
-                        continue
+                    order = await asyncio.wait_for(s.client.create_market_sell_order(symbol, amt), timeout=20)
+                    ex_results.append({"symbol": symbol, "status": order.get("status", "closed"), "filled": float(order.get("filled", 0) or 0), "cost": round(float(order.get("cost", 0) or 0), 2), "price": round(float(order.get("price", 0) or order.get("average", 0) or 0), 6), "order_id": order.get("id", "")})
+                except Exception as exc2:
+                    ex_results.append({"symbol": symbol, "status": "error", "reason": str(exc2)[:100]})
 
-                    amount_str = session.client.amount_to_precision(symbol, sell_amount)
-                    order = await asyncio.wait_for(
-                        session.client.create_market_sell_order(symbol, amount_str),
-                        timeout=20,
-                    )
-                    filled = float(order.get("filled", 0) or 0)
-                    cost = float(order.get("cost", 0) or 0)
-                    ex_results.append({"symbol": symbol, "status": order.get("status", "unknown"), "filled": filled, "cost": round(cost, 2), "price": round(price, 6), "order_id": order.get("id", "")})
-                except Exception as exc:
-                    ex_results.append({"symbol": symbol, "status": "error", "reason": str(exc)[:150]})
-
-            await session.close()
-            return {"exchange": ex_name, "env_mode": acct.env_mode, "error": None, "orders": ex_results}
+            await s.close()
+            all_results.append({"exchange": ex_name, "env_mode": acct.env_mode, "error": None, "orders": ex_results})
         except Exception as exc:
-            return {"exchange": ex_name, "env_mode": acct.env_mode, "error": str(exc)[:200], "orders": []}
-
-    target = [a for a in accounts if body.exchanges is None or a.exchange in body.exchanges]
-    all_results = await asyncio.gather(*[_liquidate_one(a) for a in target])
+            all_results.append({"exchange": ex_name, "env_mode": acct.env_mode, "error": str(exc)[:200], "orders": ex_results})
 
     total_sold = 0.0
     orders_placed = 0

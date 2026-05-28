@@ -1,0 +1,43 @@
+name: Deploy
+
+on:
+  push:
+    branches: [master, main, "feature/*"]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build frontend
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Deploy to server
+        uses: easingthemes/ssh-deploy@v5
+        with:
+          SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          ARGS: -rlgoDzvc -i --delete
+          SOURCE: "app/ web/dist/"
+          REMOTE_HOST: ${{ secrets.DEPLOY_HOST }}
+          REMOTE_USER: ubuntu
+          TARGET: /home/ubuntu/furunsystemv4/current/
+
+      - name: Restart service
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ubuntu
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            find /home/ubuntu/furunsystemv4/current -name '*.pyc' -delete
+            sudo systemctl restart furun-api
+            sleep 5
+            curl -f http://localhost:8000/ || exit 1

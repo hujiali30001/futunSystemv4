@@ -493,8 +493,8 @@ export interface LiquidateResult {
   summary: { total_sold_usdt: number; orders_placed: number; errors: number }
 }
 
-export async function liquidateAssets(exchanges?: string[]) {
-  const { data } = await api.post<LiquidateResult>('/settings/liquidate', { exchanges: exchanges ?? null })
+export async function liquidateAssets(exchanges?: string[], targets?: { exchange: string; currency: string; amount: number }[]) {
+  const { data } = await api.post<LiquidateResult>('/settings/liquidate', { exchanges: exchanges ?? null, targets: targets ?? null })
   return data
 }
 
