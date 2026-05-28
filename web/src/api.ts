@@ -324,15 +324,25 @@ export async function getAdminMe() {
 }
 
 export interface PositionItem {
+  id: number
   task_uuid: string
+  task_type: string
   symbol: string
   spot_exchange: string
   derivative_exchange: string
-  task_type: string
   target_notional: number
   expected_spread_bps: number
+  expected_funding_bps: number
   status: string
+  execution_status: string | null
   auto_recovery_status: string
+  failure_reason: string | null
+  filled_notional: number
+  realized_pnl: number | null
+  unrealized_pnl: number | null
+  total_fee: number
+  created_at: string | null
+  finished_at: string | null
 }
 
 export interface PositionPageData {

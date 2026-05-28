@@ -20,8 +20,9 @@ class RuntimeExecutionResult:
 
 
 class RuntimeTradeExecutionService:
-    def __init__(self, session_factory: ExchangeClientFactory | None = None) -> None:
+    def __init__(self, session_factory: ExchangeClientFactory | None = None, order_recorder=None) -> None:
         self.session_factory = session_factory or ExchangeClientFactory()
+        self.order_recorder = order_recorder
 
     async def run_task(
         self,
@@ -136,7 +137,7 @@ class RuntimeTradeExecutionService:
                     ),
                 ],
             )
-            executor = TradeExecutor(adapter_factory=adapters)
+            executor = TradeExecutor(adapter_factory=adapters, order_recorder=self.order_recorder)
             result = await executor.execute_open(task)
             return RuntimeExecutionResult(
                 ok=result.status == "OPEN_HEDGED",

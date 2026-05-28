@@ -18,8 +18,9 @@ class RuntimeRepairResult:
 
 
 class RuntimeRepairExecutionService:
-    def __init__(self, session_factory: ExchangeClientFactory | None = None) -> None:
+    def __init__(self, session_factory: ExchangeClientFactory | None = None, order_recorder=None) -> None:
         self.session_factory = session_factory or ExchangeClientFactory()
+        self.order_recorder = order_recorder
 
     async def run_task(
         self,
@@ -63,15 +64,52 @@ class RuntimeRepairExecutionService:
                 max(float(min_amount), float(target_quote_amount) / float(reference_price)),
             )
             market_order_price = float(reference_price) if side == "buy" else None
-            await adapter.create_order(
-                OrderRequest(
-                    symbol=symbol,
+
+            repair_order_id = None
+            if self.order_recorder is not None:
+                import uuid
+                client_id = f"repair_{target_exchange}_{uuid.uuid4().hex[:8]}"
+                repair_order_id = await self.order_recorder.record_submit(
+                    task_id=0,
+                    leg_type="spot",
+                    exchange=target_exchange,
                     side=side,
+                    market_type="spot",
+                    client_order_id=client_id,
+                    symbol=symbol,
                     order_type="market",
+                    price=None,
                     amount=float(amount),
-                    price=market_order_price,
                 )
-            )
+
+            try:
+                result = await adapter.create_order(
+                    OrderRequest(
+                        symbol=symbol,
+                        side=side,
+                        order_type="market",
+                        amount=float(amount),
+                        price=market_order_price,
+                    )
+                )
+                if self.order_recorder is not None and repair_order_id is not None:
+                    filled = float(result.get("filled", 0) or 0)
+                    fee = result.get("fee")
+                    fee_cost = float(fee.get("cost", 0)) if isinstance(fee, dict) else None
+                    fee_currency = str(fee.get("currency", "")) if isinstance(fee, dict) else None
+                    await self.order_recorder.record_open(
+                        order_id=repair_order_id,
+                        exchange_order_id=str(result.get("id", "")),
+                        avg_price=float(result.get("average", 0) or 0) if filled > 0 else None,
+                        filled_amount=filled,
+                        fee_cost=fee_cost,
+                        fee_currency=fee_currency,
+                        raw_response=result,
+                    )
+            except Exception as exc:
+                if self.order_recorder is not None and repair_order_id is not None:
+                    await self.order_recorder.record_failed(order_id=repair_order_id, reason=str(exc))
+                raise
             return RuntimeRepairResult(
                 ok=True,
                 status="REPAIRED",

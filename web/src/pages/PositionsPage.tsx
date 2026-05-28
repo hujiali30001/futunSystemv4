@@ -26,8 +26,11 @@ export function PositionsPage() {
               <th className="px-3 py-3">币种</th>
               <th className="px-3 py-3">交易所</th>
               <th className="px-3 py-3">方向</th>
-              <th className="px-3 py-3 text-right">名义金额</th>
+              <th className="px-3 py-3 text-right">成交金额</th>
               <th className="px-3 py-3 text-right">开仓价差</th>
+              <th className="px-3 py-3 text-right">已实现盈亏</th>
+              <th className="px-3 py-3 text-right">未实现盈亏</th>
+              <th className="px-3 py-3 text-right">手续费</th>
               <th className="px-3 py-3">状态</th>
               <th className="px-3 py-3">恢复状态</th>
             </tr>
@@ -43,10 +46,19 @@ export function PositionsPage() {
                   {item.task_type === 'open' ? '开仓' : '平仓'}
                 </td>
                 <td className="px-3 py-3 text-right">
-                  {item.target_notional.toFixed(0)} USDT
+                  {(item.filled_notional || item.target_notional).toFixed(0)} USDT
                 </td>
                 <td className="px-3 py-3 text-right">
                   {(item.expected_spread_bps / 100).toFixed(2)}%
+                </td>
+                <td className={`px-3 py-3 text-right ${(item.realized_pnl ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {item.realized_pnl != null ? `${item.realized_pnl.toFixed(2)} USDT` : '--'}
+                </td>
+                <td className={`px-3 py-3 text-right ${(item.unrealized_pnl ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {item.unrealized_pnl != null ? `${item.unrealized_pnl.toFixed(2)} USDT` : '--'}
+                </td>
+                <td className="px-3 py-3 text-right text-gray-500">
+                  {item.total_fee != null ? `${item.total_fee.toFixed(4)}` : '--'}
                 </td>
                 <td className="px-3 py-3">{item.status}</td>
                 <td className="px-3 py-3">{item.auto_recovery_status}</td>

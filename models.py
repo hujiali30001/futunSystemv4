@@ -146,6 +146,8 @@ class ArbitrageTask(TimestampMixin, Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     worker_node_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    realized_pnl: Mapped[float | None] = mapped_column(Float, nullable=True)
+    total_fee: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class RiskLimitRule(TimestampMixin, Base):
@@ -201,3 +203,68 @@ class AdminActionLog(TimestampMixin, Base):
     source_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     admin_user: Mapped["AdminUser"] = relationship()
+
+
+class OrderRecord(TimestampMixin, Base):
+    __tablename__ = "order_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    task_id: Mapped[int] = mapped_column(ForeignKey("arbitrage_tasks.id"), index=True)
+    leg_type: Mapped[str] = mapped_column(String(16), default="spot")
+    exchange: Mapped[str] = mapped_column(String(32))
+    exchange_account_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    side: Mapped[str] = mapped_column(String(8))
+    market_type: Mapped[str] = mapped_column(String(8), default="spot")
+    client_order_id: Mapped[str] = mapped_column(String(128), unique=True)
+    exchange_order_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    symbol: Mapped[str] = mapped_column(String(32))
+    order_type: Mapped[str] = mapped_column(String(16), default="limit")
+    price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    amount: Mapped[float] = mapped_column(Float)
+    status: Mapped[str] = mapped_column(String(32), default="submitting")
+    avg_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    filled_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    fee_cost: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fee_currency: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    raw_payload_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class FillRecord(TimestampMixin, Base):
+    __tablename__ = "fill_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    task_id: Mapped[int] = mapped_column(ForeignKey("arbitrage_tasks.id"), index=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("order_records.id"), index=True)
+    leg_type: Mapped[str] = mapped_column(String(16), default="spot")
+    exchange: Mapped[str] = mapped_column(String(32))
+    side: Mapped[str] = mapped_column(String(8))
+    symbol: Mapped[str] = mapped_column(String(32))
+    fill_price: Mapped[float] = mapped_column(Float)
+    fill_amount: Mapped[float] = mapped_column(Float)
+    fill_cost: Mapped[float] = mapped_column(Float)
+    fee_cost: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fee_currency: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    exchange_trade_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    filled_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class PositionSnapshot(TimestampMixin, Base):
+    __tablename__ = "position_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    task_id: Mapped[int] = mapped_column(ForeignKey("arbitrage_tasks.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    snapshot_type: Mapped[str] = mapped_column(String(16), default="open")
+    symbol: Mapped[str] = mapped_column(String(32))
+    spot_exchange: Mapped[str] = mapped_column(String(32))
+    derivative_exchange: Mapped[str] = mapped_column(String(32))
+    spot_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    spot_cost: Mapped[float] = mapped_column(Float, default=0.0)
+    derivative_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    derivative_cost: Mapped[float] = mapped_column(Float, default=0.0)
+    hedge_ratio: Mapped[float] = mapped_column(Float, default=0.0)
+    margin_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+    unrealized_pnl: Mapped[float | None] = mapped_column(Float, nullable=True)
+    realized_pnl: Mapped[float | None] = mapped_column(Float, nullable=True)
+    funding_fee_accrued: Mapped[float] = mapped_column(Float, default=0.0)

@@ -974,6 +974,7 @@ class ArbitrageExecutionTaskConsumer:
         event_router=None,
         region: str | None = None,
         auto_recovery_cooldown_seconds: int = 300,
+        order_recorder=None,
     ) -> None:
         self.task_repository = task_repository
         self.execution_adapter = execution_adapter
@@ -985,6 +986,10 @@ class ArbitrageExecutionTaskConsumer:
         self.event_router = event_router
         self.region = region or worker_node_id
         self.auto_recovery_cooldown_seconds = auto_recovery_cooldown_seconds
+        self.order_recorder = order_recorder
+        if self.order_recorder is not None:
+            self.execution_adapter.execution_service.order_recorder = self.order_recorder
+            self.repair_service.order_recorder = self.order_recorder
 
     def _resolve_execution_exchanges(self, task) -> tuple[str, str]:
         task_type = str(getattr(task, "task_type", "")).lower()
@@ -1199,6 +1204,29 @@ class ArbitrageExecutionTaskConsumer:
                 env_mode=self.env_mode,
                 proxies_by_exchange=proxies_by_exchange,
             )
+            if (
+                hasattr(result, "order_ids")
+                and result.order_ids
+                and self.order_recorder is not None
+            ):
+                from app.trading.order_poller import OrderPoller
+
+                poller = OrderPoller(
+                    order_recorder=self.order_recorder,
+                    adapter_factory=self.adapter_factory,
+                )
+                for exchange, oid in result.order_ids.items():
+                    if exchange not in (getattr(result, "failed_exchanges", []) or []):
+                        asyncio.create_task(
+                            poller.poll_until_closed(
+                                order_id=oid,
+                                exchange=exchange,
+                                exchange_order_id="pending",
+                                symbol=task.symbol,
+                                task_id=task.id if hasattr(task, "id") else 0,
+                                current_filled=0.0,
+                            )
+                        )
             if (
                 self.event_router is not None
                 and getattr(result, "execution_status", None) is not None

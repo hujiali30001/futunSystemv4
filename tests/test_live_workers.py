@@ -1,4 +1,4 @@
-﻿import pytest
+import pytest
 from datetime import datetime, timedelta
 
 from app.admin.control_plane import ControlDecision
@@ -3883,8 +3883,8 @@ async def test_executor_runtime_trade_execution_service_uses_payload_exchanges_s
     captured = {}
 
     class CapturingTradeExecutor:
-        def __init__(self, *, adapter_factory):
-            _ = adapter_factory
+        def __init__(self, *, adapter_factory, order_recorder=None):
+            _ = adapter_factory, order_recorder
 
         async def execute_open(self, task):
             captured["task"] = task
