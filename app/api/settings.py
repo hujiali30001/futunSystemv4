@@ -168,6 +168,20 @@ async def get_balances(
 
     factory = ExchangeClientFactory()
 
+    COMMON_CRYPTO = [
+        "BTC", "ETH", "USDT", "USDC", "BNB", "SOL", "XRP", "DOGE", "ADA", "DOT",
+        "LINK", "LTC", "BCH", "UNI", "AVAX", "MATIC", "ATOM", "ETC", "XLM", "FIL",
+        "TRX", "ICP", "NEAR", "APT", "ARB", "OP", "SUI", "WLD", "SEI", "STRK",
+        "AAVE", "ALGO", "SAND", "MANA", "APE", "AXS", "THETA", "FTM", "EGLD", "FLOW",
+        "GRT", "SNX", "COMP", "MKR", "CRV", "RUNE", "1INCH", "DYDX", "INJ", "FET",
+        "RENDER", "TAO", "ENA", "JUP", "WIF", "ONDO", "PEPE", "SHIB", "BONK", "W",
+        "TIA", "PYTH", "JTO", "HNT", "KAS", "MNT", "ZRO", "PENDLE", "EIGEN", "SAFE",
+        "MOVE", "BERA", "IP", "KAITO", "SONIC", "ANIME", "STORY", "ME", "MELANIA",
+        "TRUMP", "VINE", "MORPHO", "VIRTUAL", "AI16Z", "AIXBT", "GOAT", "ZEREBRO",
+        "FARTCOIN", "PENGU", "USUAL", "MODE", "LDO", "IMX", "STX", "CRO", "VET",
+        "HBAR", "MANTRA", "OM", "RAY", "BSV", "ZEC", "DASH", "ICX", "XTZ", "ZIL",
+    ]
+
     async def _fetch_one(acct) -> dict:
         try:
             api_key = cipher.decrypt(acct.api_key_ciphertext)
@@ -183,19 +197,26 @@ async def get_balances(
                 exchange=acct.exchange, env_mode=acct.env_mode,
                 proxies={}, credentials=creds,
             )
-            try:
-                balance = await asyncio.wait_for(
-                    session.client.fetch_balance(),
-                    timeout=BALANCE_TIMEOUT,
-                )
-            except asyncio.TimeoutError:
-                await session.close()
-                return {"exchange": acct.exchange, "env_mode": acct.env_mode, "error": "timeout", "assets": [], "total_usdt": 0}
-            except Exception:
-                await session.close()
-                raise
 
-            non_usdt: list[str] = []
+            symbols = [f"{c}/USDT" for c in COMMON_CRYPTO]
+
+            async def _get_balance():
+                return await asyncio.wait_for(session.client.fetch_balance(), timeout=BALANCE_TIMEOUT)
+
+            async def _get_tickers():
+                public_session = factory.create_session(exchange=acct.exchange, env_mode=acct.env_mode, proxies={})
+                try:
+                    return await asyncio.wait_for(public_session.client.fetch_tickers(symbols), timeout=BALANCE_TIMEOUT)
+                finally:
+                    await public_session.close()
+
+            balance_task = asyncio.create_task(_get_balance())
+            tickers_task = asyncio.create_task(_get_tickers())
+
+            balance = await balance_task
+            tickers = await tickers_task
+
+            non_usdt_fallback: list[str] = []
             assets_raw: list[dict] = []
             for currency, info in (balance.get("total") or {}).items():
                 if isinstance(info, (int, float)):
@@ -211,24 +232,25 @@ async def get_balances(
                 if currency in ("USDT", "USD"):
                     usdt_value = total_amount
                 else:
-                    usdt_value = 0.0
-                    if total_amount > 0:
-                        non_usdt.append(currency)
+                    ticker = tickers.get(f"{currency}/USDT", {})
+                    price = float(ticker.get("last", 0) or 0)
+                    if price > 0:
+                        usdt_value = price * total_amount
+                    else:
+                        usdt_value = 0.0
+                        non_usdt_fallback.append(currency)
                 assets_raw.append({"currency": currency, "free": round(free, 8), "used": round(used, 8), "total": round(total_amount, 8), "usdt_value": round(usdt_value, 2)})
 
-            if non_usdt:
+            if non_usdt_fallback:
                 try:
-                    symbols = [f"{c}/USDT" for c in non_usdt]
-                    tickers = await asyncio.wait_for(
-                        session.client.fetch_tickers(symbols),
-                        timeout=BALANCE_TIMEOUT,
-                    )
+                    fb_symbols = [f"{c}/USDT" for c in non_usdt_fallback]
+                    fb_tickers = await asyncio.wait_for(session.client.fetch_tickers(fb_symbols), timeout=BALANCE_TIMEOUT)
                     for a in assets_raw:
-                        if a["currency"] in ("USDT", "USD"):
+                        if a["currency"] in ("USDT", "USD") or a["usdt_value"] > 0:
                             continue
-                        ticker = tickers.get(f"{a['currency']}/USDT", {})
-                        price = float(ticker.get("last", 0) or 0)
-                        a["usdt_value"] = round(price * a["total"], 2)
+                        t = fb_tickers.get(f"{a['currency']}/USDT", {})
+                        p = float(t.get("last", 0) or 0)
+                        a["usdt_value"] = round(p * a["total"], 2)
                 except Exception:
                     pass
 
@@ -238,6 +260,8 @@ async def get_balances(
             assets.sort(key=lambda a: a["usdt_value"], reverse=True)
             ex_total = sum(a["usdt_value"] for a in assets)
             return {"exchange": acct.exchange, "env_mode": acct.env_mode, "error": None, "assets": assets, "total_usdt": round(ex_total, 2)}
+        except asyncio.TimeoutError:
+            return {"exchange": acct.exchange, "env_mode": acct.env_mode, "error": "timeout", "assets": [], "total_usdt": 0}
         except Exception as exc:
             return {"exchange": acct.exchange, "env_mode": acct.env_mode, "error": str(exc)[:200], "assets": [], "total_usdt": 0}
 
