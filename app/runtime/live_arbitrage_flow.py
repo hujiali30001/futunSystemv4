@@ -116,6 +116,30 @@ class LiveArbitrageFlowService:
 
         await self.publisher.publish(open_opp)
         await self.publisher.publish(close_opp)
+
+        fs_open = self.calculator.build_arbitrage_opportunity(
+            symbol=symbol,
+            spot_exchange=derivative_exchange,
+            derivative_exchange=spot_exchange,
+            spot=derivative_snapshot,
+            derivative=spot_snapshot,
+            funding_rate=-funding_rate,
+            opportunity_type="OPEN",
+        )
+        fs_open.direction = "futures_spot"
+        fs_close = self.calculator.build_arbitrage_opportunity(
+            symbol=symbol,
+            spot_exchange=derivative_exchange,
+            derivative_exchange=spot_exchange,
+            spot=derivative_snapshot,
+            derivative=spot_snapshot,
+            funding_rate=-funding_rate,
+            opportunity_type="CLOSE",
+        )
+        fs_close.direction = "futures_spot"
+        await self.publisher.publish(fs_open)
+        await self.publisher.publish(fs_close)
+
         return open_opp, close_opp
 
     @staticmethod

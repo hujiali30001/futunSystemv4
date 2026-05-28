@@ -137,10 +137,12 @@ export function LeaderboardPage() {
   }, [token])
 
   const handleStart = (row: LeaderboardRow) => {
+    const spot = direction === 'futures_spot' ? row.derivative_exchange : row.spot_exchange
+    const deriv = direction === 'futures_spot' ? row.spot_exchange : row.derivative_exchange
     const params = new URLSearchParams({
       symbol: row.full_symbol,
-      spot_exchange: row.spot_exchange,
-      derivative_exchange: row.derivative_exchange,
+      spot_exchange: spot,
+      derivative_exchange: deriv,
     })
     navigate(`/strategies?${params.toString()}`)
   }

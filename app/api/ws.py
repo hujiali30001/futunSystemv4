@@ -49,6 +49,8 @@ async def leaderboard_ws(
 
         rows = []
         for (symbol, spot, deriv, fdir), entry_by_type in paired.items():
+            if fdir != direction:
+                continue
             open_entry = entry_by_type.get("OPEN")
             close_entry = entry_by_type.get("CLOSE", open_entry)
             if open_entry is None:
