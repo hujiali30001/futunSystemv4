@@ -48,4 +48,5 @@ class ArbitrageExecutionAdapter:
             proxies_by_exchange=proxies_by_exchange,
             buy_market_type=buy_market_type,
             sell_market_type=sell_market_type,
+            db_task_id=int(task.id),
         )

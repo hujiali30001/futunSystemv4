@@ -38,6 +38,7 @@ class RuntimeTradeExecutionService:
         proxies_by_exchange: dict[str, dict[str, str]] | None = None,
         buy_market_type: str = "spot",
         sell_market_type: str = "swap",
+        db_task_id: int = 0,
     ) -> RuntimeExecutionResult:
         _ = execution_accounts_by_exchange
         unique_exchanges = list(dict.fromkeys(exchanges))
@@ -138,7 +139,7 @@ class RuntimeTradeExecutionService:
                 ],
             )
             executor = TradeExecutor(adapter_factory=adapters, order_recorder=self.order_recorder)
-            result = await executor.execute_open(task)
+            result = await executor.execute_open(task, db_task_id=db_task_id)
             return RuntimeExecutionResult(
                 ok=result.status == "OPEN_HEDGED",
                 execution_status=result.status,

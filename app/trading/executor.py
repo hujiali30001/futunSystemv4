@@ -21,7 +21,8 @@ class TradeExecutor:
         self.adapter_factory = adapter_factory
         self.order_recorder = order_recorder
 
-    async def execute_open(self, task: ExecutionTask) -> ExecutionResult:
+    async def execute_open(self, task: ExecutionTask,
+                           db_task_id: int = 0) -> ExecutionResult:
         coroutines = []
         exchanges = []
         record_ids: dict[str, int] = {}
@@ -32,10 +33,7 @@ class TradeExecutor:
             client_id = f"{task.task_id}_{leg.exchange}_{uuid.uuid4().hex[:8]}"
 
             if self.order_recorder is not None:
-                try:
-                    tid = int(task.task_id)
-                except (ValueError, TypeError):
-                    tid = 0
+                tid = db_task_id
                 oid = await self.order_recorder.record_submit(
                     task_id=tid,
                     leg_type="spot" if market_type == "spot" else "derivative",
@@ -94,7 +92,7 @@ async def _place_order(adapter, task, leg, market_type, recorder, record_id):
         )
     except Exception as exc:
         if recorder is not None and record_id is not None:
-            await recorder.record_failed(order_id=record_id, reason=str(exc))
+            await recorder.record_failed(order_id=record_id, reason=str(exc)[:250])
         raise
 
     if recorder is not None and record_id is not None:

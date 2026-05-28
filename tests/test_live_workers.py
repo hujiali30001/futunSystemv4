@@ -3886,7 +3886,8 @@ async def test_executor_runtime_trade_execution_service_uses_payload_exchanges_s
         def __init__(self, *, adapter_factory, order_recorder=None):
             _ = adapter_factory, order_recorder
 
-        async def execute_open(self, task):
+        async def execute_open(self, task, db_task_id=0):
+            _ = db_task_id
             captured["task"] = task
             return type(
                 "ExecutionSummary",

@@ -15,6 +15,7 @@ class TradeExecutionServiceStub:
 
 class TaskRecord:
     def __init__(self, *, task_type: str):
+        self.id = 1
         self.task_uuid = "task-1"
         self.task_type = task_type
         self.symbol = "BTC/USDT"
