@@ -5,7 +5,9 @@ import {
   createExchangeAccount,
   updateExchangeAccount,
   deleteExchangeAccount,
+  getBalances,
   type UserSettings,
+  type BalancesData,
 } from '../api'
 
 const EXCHANGES = ['binance', 'okx', 'bybit', 'gate', 'bitget']
@@ -18,6 +20,9 @@ export function SettingsPage() {
   const [editEx, setEditEx] = useState<string | null>(null)
   const [exForm, setExForm] = useState({ api_key: '', secret: '', passphrase: '' })
 
+  const [balances, setBalances] = useState<BalancesData | null>(null)
+  const [loadingBal, setLoadingBal] = useState(false)
+
   useEffect(() => {
     getSettings().then((s) => {
       setSettings(s)
@@ -25,6 +30,18 @@ export function SettingsPage() {
       setFeishu(s.feishu_webhook_url || '')
     })
   }, [])
+
+  const refreshBalance = async () => {
+    setLoadingBal(true)
+    try {
+      const b = await getBalances()
+      setBalances(b)
+    } finally {
+      setLoadingBal(false)
+    }
+  }
+
+  useEffect(() => { refreshBalance() }, [])
 
   const saveProfile = async () => {
     setSaving(true)
@@ -143,6 +160,73 @@ export function SettingsPage() {
             </div>
           )
         })}
+      </div>
+
+      <div className="rounded-lg border border-gray-800 p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-sm text-gray-400">资产概览</h3>
+          <button
+            onClick={refreshBalance}
+            disabled={loadingBal}
+            className="rounded bg-gray-800 px-3 py-1 text-xs text-gray-400 hover:text-white disabled:opacity-50"
+          >
+            {loadingBal ? '刷新中...' : '刷新'}
+          </button>
+        </div>
+        {balances ? (
+          <div>
+            <div className="mb-3 text-center">
+              <span className="text-2xl font-bold text-emerald-400">
+                ${balances.total_usdt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+              <p className="text-xs text-gray-500">资产总额 (USDT)</p>
+            </div>
+            {balances.exchanges.length === 0 ? (
+              <p className="text-center text-xs text-gray-600">请先配置交易所 API</p>
+            ) : (
+              balances.exchanges.map((ex) => (
+                <div key={ex.exchange} className="mb-3 rounded border border-gray-700 p-3">
+                  <div className="mb-1 flex items-center justify-between">
+                    <span className="font-mono text-sm text-gray-300">{ex.exchange}</span>
+                    <span className="text-sm text-gray-400">
+                      {ex.error ? (
+                        <span className="text-red-400 text-xs">{ex.error}</span>
+                      ) : (
+                        `${ex.env_mode} · $${ex.total_usdt.toLocaleString('en-US', { minimumFractionDigits: 2 })}`
+                      )}
+                    </span>
+                  </div>
+                  {ex.assets.length > 0 && (
+                    <div className="mt-2 overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="text-gray-500">
+                            <th className="py-1 text-left">币种</th>
+                            <th className="py-1 text-right">可用</th>
+                            <th className="py-1 text-right">冻结</th>
+                            <th className="py-1 text-right">估值(USDT)</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {ex.assets.map((a) => (
+                            <tr key={a.currency} className="border-t border-gray-800">
+                              <td className="py-1 text-gray-300">{a.currency}</td>
+                              <td className="py-1 text-right text-gray-400">{a.free < 0.0001 ? a.free.toFixed(8) : a.free.toFixed(4)}</td>
+                              <td className="py-1 text-right text-gray-500">{a.used < 0.0001 ? a.used.toFixed(8) : a.used.toFixed(4)}</td>
+                              <td className="py-1 text-right text-gray-300">${a.usdt_value.toFixed(2)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        ) : loadingBal ? (
+          <p className="text-center text-xs text-gray-500">加载中...</p>
+        ) : null}
       </div>
     </div>
   )

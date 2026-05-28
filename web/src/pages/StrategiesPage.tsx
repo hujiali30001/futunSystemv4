@@ -5,10 +5,26 @@ import {
   deleteStrategy,
   getStrategies,
   toggleStrategy,
+  updateStrategy,
   type Strategy,
 } from '../api'
 
 type TierRow = { spread_bps: number; ratio: number }
+
+function resetForm(presetSymbol = '', presetSpot = '', presetDeriv = '', presetOpen = 0, presetClose = 0) {
+  return {
+    name: '',
+    symbol: presetSymbol,
+    spot: presetSpot,
+    deriv: presetDeriv,
+    amount: 10,
+    openBps: presetOpen || 100,
+    closeBps: presetClose || 10,
+    tiers: false,
+    openTiers: [{ spread_bps: presetOpen || 100, ratio: 1.0 }] as TierRow[],
+    closeTiers: [{ spread_bps: presetClose || 10, ratio: 1.0 }] as TierRow[],
+  }
+}
 
 export function StrategiesPage() {
   const [strategies, setStrategies] = useState<Strategy[]>([])
@@ -29,50 +45,78 @@ export function StrategiesPage() {
   const presetSymbol = searchParams.get('symbol')
   const presetSpot = searchParams.get('spot_exchange')
   const presetDeriv = searchParams.get('derivative_exchange')
-  const presetOpen = searchParams.get('open_spread_bps')
-  const presetClose = searchParams.get('close_spread_bps')
+  const presetOpen = Number(searchParams.get('open_spread_bps'))
+  const presetClose = Number(searchParams.get('close_spread_bps'))
 
+  const [editingId, setEditingId] = useState<number | null>(null)
   const [showForm, setShowForm] = useState(!!presetSymbol)
-  const [formName, setFormName] = useState('')
-  const [formSymbol, setFormSymbol] = useState(presetSymbol || '')
-  const [formSpot, setFormSpot] = useState(presetSpot || '')
-  const [formDeriv, setFormDeriv] = useState(presetDeriv || '')
-  const [formAmount, setFormAmount] = useState(10)
-  const [formOpenBps, setFormOpenBps] = useState(Number(presetOpen) || 100)
-  const [formCloseBps, setFormCloseBps] = useState(Number(presetClose) || 10)
+  const [form, setForm] = useState(resetForm(presetSymbol || '', presetSpot || '', presetDeriv || '', presetOpen, presetClose))
   const [submitting, setSubmitting] = useState(false)
-  const [useTiers, setUseTiers] = useState(false)
-  const [openTiers, setOpenTiers] = useState<TierRow[]>([
-    { spread_bps: formOpenBps, ratio: 1.0 },
-  ])
-  const [closeTiers, setCloseTiers] = useState<TierRow[]>([
-    { spread_bps: formCloseBps, ratio: 1.0 },
-  ])
 
-  const handleCreate = async (e: React.FormEvent) => {
+  const openNew = () => {
+    setEditingId(null)
+    setForm(resetForm())
+    setShowForm(true)
+  }
+
+  const openEdit = (s: Strategy) => {
+    const symbol = s.symbol_scope_json?.[0] || ''
+    const spot = s.exchange_scope_json?.[0] || ''
+    const deriv = s.exchange_scope_json?.[1] || ''
+    const hasTiers = (s.open_tiers_json?.length || 0) > 1 || (s.close_tiers_json?.length || 0) > 1
+    setEditingId(s.id)
+    setForm({
+      name: s.name,
+      symbol,
+      spot,
+      deriv,
+      amount: s.target_quote_amount,
+      openBps: s.open_spread_bps_threshold,
+      closeBps: s.close_spread_bps_threshold,
+      tiers: hasTiers,
+      openTiers: s.open_tiers_json?.length
+        ? s.open_tiers_json.map((t: any) => ({ spread_bps: t.spread_bps, ratio: t.ratio }))
+        : [{ spread_bps: s.open_spread_bps_threshold, ratio: 1.0 }],
+      closeTiers: s.close_tiers_json?.length
+        ? s.close_tiers_json.map((t: any) => ({ spread_bps: t.spread_bps, ratio: t.ratio }))
+        : [{ spread_bps: s.close_spread_bps_threshold, ratio: 1.0 }],
+    })
+    setShowForm(true)
+  }
+
+  const closeForm = () => {
+    setShowForm(false)
+    setEditingId(null)
+    navigate('/strategies', { replace: true })
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!formName || !formSymbol || !formSpot || !formDeriv) return
+    if (!form.name || !form.symbol || !form.spot || !form.deriv) return
     setSubmitting(true)
     try {
       const body: any = {
-        name: formName,
-        symbol: formSymbol,
-        spot_exchange: formSpot,
-        derivative_exchange: formDeriv,
-        target_quote_amount: formAmount,
-        open_spread_bps_threshold: formOpenBps,
-        close_spread_bps_threshold: formCloseBps,
+        name: form.name,
+        target_quote_amount: form.amount,
+        open_spread_bps_threshold: form.openBps,
+        close_spread_bps_threshold: form.closeBps,
       }
-      if (useTiers) {
-        body.open_tiers_json = openTiers.filter(t => t.ratio > 0)
-        body.close_tiers_json = closeTiers.filter(t => t.ratio > 0)
+      if (!editingId) {
+        body.symbol = form.symbol
+        body.spot_exchange = form.spot
+        body.derivative_exchange = form.deriv
       }
-      await createStrategy(body)
-      setShowForm(false)
-      setFormName('')
-      setFormSymbol('')
+      if (form.tiers) {
+        body.open_tiers_json = form.openTiers.filter(t => t.ratio > 0)
+        body.close_tiers_json = form.closeTiers.filter(t => t.ratio > 0)
+      }
+      if (editingId) {
+        await updateStrategy(editingId, body)
+      } else {
+        await createStrategy(body)
+      }
+      closeForm()
       load()
-      navigate('/strategies', { replace: true })
     } finally {
       setSubmitting(false)
     }
@@ -96,7 +140,7 @@ export function StrategiesPage() {
       <div className="mb-4 flex items-center justify-between">
         <h1 className="text-xl font-bold">我的策略</h1>
         <button
-          onClick={() => { setShowForm(!showForm); navigate('/strategies', { replace: true }) }}
+          onClick={() => showForm ? closeForm() : openNew()}
           className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium hover:bg-emerald-500"
         >
           {showForm ? '取消' : '新建策略'}
@@ -105,15 +149,16 @@ export function StrategiesPage() {
 
       {showForm && (
         <form
-          onSubmit={handleCreate}
+          onSubmit={handleSubmit}
           className="mb-6 rounded-lg border border-gray-800 bg-gray-900 p-4"
         >
+          <h3 className="mb-3 text-sm text-gray-400">{editingId ? '编辑策略' : '新建策略'}</h3>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
             <div>
               <label className="mb-1 block text-xs text-gray-400">策略名称</label>
               <input
-                value={formName}
-                onChange={(e) => setFormName(e.target.value)}
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
                 className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-sm text-white focus:border-emerald-500 focus:outline-none"
                 placeholder="如 BTC 期现"
                 required
@@ -122,39 +167,42 @@ export function StrategiesPage() {
             <div>
               <label className="mb-1 block text-xs text-gray-400">交易对</label>
               <input
-                value={formSymbol}
-                onChange={(e) => setFormSymbol(e.target.value)}
+                value={form.symbol}
+                onChange={(e) => setForm({ ...form, symbol: e.target.value })}
                 className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-sm text-white focus:border-emerald-500 focus:outline-none"
                 placeholder="BTC/USDT"
                 required
+                disabled={!!editingId}
               />
             </div>
             <div>
               <label className="mb-1 block text-xs text-gray-400">现货交易所</label>
               <input
-                value={formSpot}
-                onChange={(e) => setFormSpot(e.target.value)}
+                value={form.spot}
+                onChange={(e) => setForm({ ...form, spot: e.target.value })}
                 className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-sm text-white focus:border-emerald-500 focus:outline-none"
                 placeholder="binance"
                 required
+                disabled={!!editingId}
               />
             </div>
             <div>
               <label className="mb-1 block text-xs text-gray-400">合约交易所</label>
               <input
-                value={formDeriv}
-                onChange={(e) => setFormDeriv(e.target.value)}
+                value={form.deriv}
+                onChange={(e) => setForm({ ...form, deriv: e.target.value })}
                 className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-sm text-white focus:border-emerald-500 focus:outline-none"
                 placeholder="bybit"
                 required
+                disabled={!!editingId}
               />
             </div>
             <div>
               <label className="mb-1 block text-xs text-gray-400">投入 USDT</label>
               <input
                 type="number"
-                value={formAmount}
-                onChange={(e) => setFormAmount(Number(e.target.value))}
+                value={form.amount}
+                onChange={(e) => setForm({ ...form, amount: Number(e.target.value) })}
                 className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-sm text-white focus:border-emerald-500 focus:outline-none"
                 min={1}
                 required
@@ -165,8 +213,8 @@ export function StrategiesPage() {
               <input
                 type="number"
                 step="0.1"
-                value={formOpenBps / 100}
-                onChange={(e) => setFormOpenBps(Number(e.target.value) * 100)}
+                value={form.openBps / 100}
+                onChange={(e) => setForm({ ...form, openBps: Number(e.target.value) * 100 })}
                 className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-sm text-white focus:border-emerald-500 focus:outline-none"
               />
             </div>
@@ -175,8 +223,8 @@ export function StrategiesPage() {
               <input
                 type="number"
                 step="0.01"
-                value={formCloseBps / 100}
-                onChange={(e) => setFormCloseBps(Number(e.target.value) * 100)}
+                value={form.closeBps / 100}
+                onChange={(e) => setForm({ ...form, closeBps: Number(e.target.value) * 100 })}
                 className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-sm text-white focus:border-emerald-500 focus:outline-none"
               />
             </div>
@@ -186,7 +234,7 @@ export function StrategiesPage() {
                 disabled={submitting}
                 className="w-full rounded bg-emerald-600 py-1.5 text-sm font-medium hover:bg-emerald-500 disabled:opacity-50"
               >
-                {submitting ? '保存中...' : '保存并启动'}
+                {submitting ? '保存中...' : editingId ? '保存修改' : '保存并启动'}
               </button>
             </div>
           </div>
@@ -195,62 +243,36 @@ export function StrategiesPage() {
             <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
               <input
                 type="checkbox"
-                checked={useTiers}
-                onChange={(e) => setUseTiers(e.target.checked)}
+                checked={form.tiers}
+                onChange={(e) => setForm({ ...form, tiers: e.target.checked })}
               />
               多级开清仓
             </label>
-            {useTiers && (
+            {form.tiers && (
               <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div>
                   <div className="mb-1 flex items-center justify-between">
                     <span className="text-xs text-gray-500">开仓梯度</span>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setOpenTiers([...openTiers, { spread_bps: 200, ratio: 1.0 }])
-                      }
-                      className="text-xs text-emerald-400 hover:underline"
-                    >
-                      + 添加
-                    </button>
+                    <button type="button" onClick={() => setForm({ ...form, openTiers: [...form.openTiers, { spread_bps: 200, ratio: 1.0 }] })} className="text-xs text-emerald-400 hover:underline">+ 添加</button>
                   </div>
-                  {openTiers.map((t, i) => (
+                  {form.openTiers.map((t, i) => (
                     <div key={i} className="mb-1 flex gap-2">
                       <input
-                        type="number"
-                        step="1"
-                        value={t.spread_bps}
+                        type="number" step="1" value={t.spread_bps}
                         onChange={(e) => {
-                          const next = [...openTiers]
-                          next[i] = { ...t, spread_bps: Number(e.target.value) }
-                          setOpenTiers(next)
+                          const next = [...form.openTiers]; next[i] = { ...t, spread_bps: Number(e.target.value) }; setForm({ ...form, openTiers: next })
                         }}
-                        className="w-24 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-white"
-                        placeholder="bps"
+                        className="w-24 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-white" placeholder="bps"
                       />
                       <input
-                        type="number"
-                        step="0.1"
-                        min="0"
-                        max="1"
-                        value={t.ratio}
+                        type="number" step="0.1" min="0" max="1" value={t.ratio}
                         onChange={(e) => {
-                          const next = [...openTiers]
-                          next[i] = { ...t, ratio: Number(e.target.value) }
-                          setOpenTiers(next)
+                          const next = [...form.openTiers]; next[i] = { ...t, ratio: Number(e.target.value) }; setForm({ ...form, openTiers: next })
                         }}
-                        className="w-20 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-white"
-                        placeholder="ratio"
+                        className="w-20 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-white" placeholder="ratio"
                       />
-                      {openTiers.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => setOpenTiers(openTiers.filter((_, j) => j !== i))}
-                          className="text-xs text-red-400 hover:underline"
-                        >
-                          删除
-                        </button>
+                      {form.openTiers.length > 1 && (
+                        <button type="button" onClick={() => setForm({ ...form, openTiers: form.openTiers.filter((_, j) => j !== i) })} className="text-xs text-red-400 hover:underline">删除</button>
                       )}
                     </div>
                   ))}
@@ -259,52 +281,26 @@ export function StrategiesPage() {
                 <div>
                   <div className="mb-1 flex items-center justify-between">
                     <span className="text-xs text-gray-500">清仓梯度</span>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setCloseTiers([...closeTiers, { spread_bps: 50, ratio: 1.0 }])
-                      }
-                      className="text-xs text-emerald-400 hover:underline"
-                    >
-                      + 添加
-                    </button>
+                    <button type="button" onClick={() => setForm({ ...form, closeTiers: [...form.closeTiers, { spread_bps: 50, ratio: 1.0 }] })} className="text-xs text-emerald-400 hover:underline">+ 添加</button>
                   </div>
-                  {closeTiers.map((t, i) => (
+                  {form.closeTiers.map((t, i) => (
                     <div key={i} className="mb-1 flex gap-2">
                       <input
-                        type="number"
-                        step="1"
-                        value={t.spread_bps}
+                        type="number" step="1" value={t.spread_bps}
                         onChange={(e) => {
-                          const next = [...closeTiers]
-                          next[i] = { ...t, spread_bps: Number(e.target.value) }
-                          setCloseTiers(next)
+                          const next = [...form.closeTiers]; next[i] = { ...t, spread_bps: Number(e.target.value) }; setForm({ ...form, closeTiers: next })
                         }}
-                        className="w-24 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-white"
-                        placeholder="bps"
+                        className="w-24 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-white" placeholder="bps"
                       />
                       <input
-                        type="number"
-                        step="0.1"
-                        min="0"
-                        max="1"
-                        value={t.ratio}
+                        type="number" step="0.1" min="0" max="1" value={t.ratio}
                         onChange={(e) => {
-                          const next = [...closeTiers]
-                          next[i] = { ...t, ratio: Number(e.target.value) }
-                          setCloseTiers(next)
+                          const next = [...form.closeTiers]; next[i] = { ...t, ratio: Number(e.target.value) }; setForm({ ...form, closeTiers: next })
                         }}
-                        className="w-20 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-white"
-                        placeholder="ratio"
+                        className="w-20 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-white" placeholder="ratio"
                       />
-                      {closeTiers.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => setCloseTiers(closeTiers.filter((_, j) => j !== i))}
-                          className="text-xs text-red-400 hover:underline"
-                        >
-                          删除
-                        </button>
+                      {form.closeTiers.length > 1 && (
+                        <button type="button" onClick={() => setForm({ ...form, closeTiers: form.closeTiers.filter((_, j) => j !== i) })} className="text-xs text-red-400 hover:underline">删除</button>
                       )}
                     </div>
                   ))}
@@ -357,6 +353,12 @@ export function StrategiesPage() {
                 </div>
               </div>
               <div className="flex gap-2">
+                <button
+                  onClick={() => openEdit(s)}
+                  className="rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-800 hover:text-white"
+                >
+                  编辑
+                </button>
                 <label className="relative inline-flex cursor-pointer items-center">
                   <input
                     type="checkbox"

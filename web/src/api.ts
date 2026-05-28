@@ -425,12 +425,38 @@ export async function updateExchangeAccount(
   id: number,
   body: { api_key: string; secret: string; passphrase?: string },
 ) {
-  const { data } = await api.put<ExchangeAccount>(`/settings/exchange-accounts/${id}`, body)
+  const { data } = await api.put<ExchangeAccount>(`/settings/exchange/${id}`, body)
   return data
 }
 
 export async function deleteExchangeAccount(id: number) {
-  await api.delete(`/settings/exchange-accounts/${id}`)
+  await api.delete(`/settings/exchange/${id}`)
+}
+
+export interface AssetItem {
+  currency: string
+  free: number
+  used: number
+  total: number
+  usdt_value: number
+}
+
+export interface ExchangeBalance {
+  exchange: string
+  env_mode: string
+  error: string | null
+  assets: AssetItem[]
+  total_usdt: number
+}
+
+export interface BalancesData {
+  exchanges: ExchangeBalance[]
+  total_usdt: number
+}
+
+export async function getBalances() {
+  const { data } = await api.get<BalancesData>('/settings/balances')
+  return data
 }
 
 export interface TradeToggleResponse {
