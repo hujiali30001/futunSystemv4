@@ -36,6 +36,8 @@ async def leaderboard_ws(
                         "close_spread_bps": float(fields.get("close_spread_bps", 0)),
                         "funding_rate": float(fields.get("funding_rate", 0)),
                         "direction": fdir,
+                        "first_price": float(fields.get("first_price", 0)),
+                        "second_price": float(fields.get("second_price", 0)),
                     }
                 except (ValueError, TypeError):
                     pass
@@ -77,6 +79,9 @@ async def leaderboard_ws(
                 else f"{fr_pct:+.2f}%/h/{_funding_interval_h(fr_pct)}"
             )
 
+            fb = open_entry.get("first_price", 0)
+            sb = open_entry.get("second_price", 0)
+
             rows.append({
                 "symbol": symbol.replace("/USDT", ""),
                 "full_symbol": symbol,
@@ -86,6 +91,8 @@ async def leaderboard_ws(
                 "close_spread_pct": close_pct,
                 "funding_rate_display": f"{fr_display} {fr_label}" if fr_label else fr_display,
                 "sort_value": round(open_pct, 2),
+                "spot_price": f"{fb:.5f}" if fb > 0 else "",
+                "deriv_price": f"{sb:.5f}" if sb > 0 else "",
             })
 
         rows.sort(key=lambda r: r["sort_value"], reverse=True)
@@ -101,15 +108,13 @@ async def leaderboard_ws(
                 keys.append(f"md:ticker:{r['derivative_exchange']}:swap:{r['full_symbol']}")
         vals = await redis.mget(keys) if keys else []
 
-        spot_prices: dict = {}
-        deriv_prices: dict = {}
         spot_vols: dict = {}
         deriv_vols: dict = {}
         for i, r in enumerate(top100):
             sv = vals[i * 2] if i * 2 < len(vals) else None
             dv = vals[i * 2 + 1] if i * 2 + 1 < len(vals) else None
-            pairs = [(dv, True), (sv, False)] if direction == "futures_spot" else [(sv, True), (dv, False)]
-            for val, is_spot in pairs:
+            is_spot_first = direction != "futures_spot"
+            for val, is_spot in [(sv, is_spot_first), (dv, not is_spot_first)]:
                 if val is None:
                     continue
                 parts = str(val).split("|")
@@ -117,21 +122,16 @@ async def leaderboard_ws(
                     continue
                 try:
                     vol = float(parts[0])
-                    price = float(parts[1])
                 except (ValueError, TypeError):
                     continue
                 pk = (r["full_symbol"], r["spot_exchange"], r["derivative_exchange"])
                 if is_spot:
-                    spot_prices[pk] = f"{price:.5f}"
                     spot_vols[pk] = _format_volume(vol)
                 else:
-                    deriv_prices[pk] = f"{price:.5f}"
                     deriv_vols[pk] = _format_volume(vol)
 
         for r in top100:
             pk = (r["full_symbol"], r["spot_exchange"], r["derivative_exchange"])
-            r["spot_price"] = spot_prices.get(pk, "")
-            r["deriv_price"] = deriv_prices.get(pk, "")
             r["spot_volume"] = spot_vols.get(pk, "--")
             r["deriv_volume"] = deriv_vols.get(pk, "--")
 

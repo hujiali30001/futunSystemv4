@@ -75,6 +75,8 @@ def test_arbitrage_opportunity_to_payload_contains_open_close_boundary_fields():
         "redis_member": "binance:okx:BTC/USDT:OPEN:1",
         "timestamp": 123.0,
         "direction": "spot_futures",
+        "first_price": "0.0",
+        "second_price": "0.0",
     }
 
 

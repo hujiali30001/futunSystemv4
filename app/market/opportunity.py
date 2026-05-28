@@ -23,6 +23,8 @@ class ArbitrageOpportunity:
     redis_member: str
     timestamp: float
     direction: str = "spot_futures"
+    first_price: float = 0.0
+    second_price: float = 0.0
 
 
 def arbitrage_opportunity_to_payload(
@@ -40,6 +42,8 @@ def arbitrage_opportunity_to_payload(
         "redis_member": opportunity.redis_member,
         "timestamp": opportunity.timestamp,
         "direction": opportunity.direction,
+        "first_price": str(opportunity.first_price),
+        "second_price": str(opportunity.second_price),
     }
 
 
@@ -114,6 +118,8 @@ class OpportunityCalculator:
             ),
             timestamp=current_time,
             direction="spot_futures",
+            first_price=spot.best_ask,
+            second_price=derivative.best_bid,
         )
 
     def build_opportunity(

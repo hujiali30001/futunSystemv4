@@ -47,6 +47,8 @@ async def leaderboard(
                     "close_spread_bps": float(fields.get("close_spread_bps", 0)),
                     "funding_rate": float(fields.get("funding_rate", 0)),
                     "direction": fdir,
+                    "first_price": float(fields.get("first_price", 0)),
+                    "second_price": float(fields.get("second_price", 0)),
                 }
             except (ValueError, TypeError):
                 pass
@@ -95,6 +97,9 @@ async def leaderboard(
 
         sort_val = open_spread_pct
 
+        fb = open_entry.get("first_price", 0)
+        sb = open_entry.get("second_price", 0)
+
         rows.append({
             "symbol": base_symbol,
             "full_symbol": symbol,
@@ -106,8 +111,8 @@ async def leaderboard(
             "funding_rate_raw": fr,
             "sort_value": round(sort_val, 2),
             "index_spread_pct": 0.0,
-            "spot_price": "",
-            "deriv_price": "",
+            "spot_price": f"{fb:.5f}" if fb > 0 else "",
+            "deriv_price": f"{sb:.5f}" if sb > 0 else "",
             "spot_volume": "",
             "deriv_volume": "",
         })
@@ -167,8 +172,6 @@ async def leaderboard(
             dl = deriv_last.get(i, 0)
             if sl > 0 and dl > 0:
                 row["index_spread_pct"] = round((dl - sl) / sl * 100, 3)
-            row["spot_price"] = f"{sl:.5f}" if sl > 0 else ""
-            row["deriv_price"] = f"{dl:.5f}" if dl > 0 else ""
             row["spot_volume"] = _format_volume(spot_vol.get(i, 0))
             row["deriv_volume"] = _format_volume(deriv_vol.get(i, 0))
 
