@@ -63,16 +63,18 @@ async def leaderboard_ws(
                 continue
 
             fr = open_entry["funding_rate"]
-            fr_pct = fr * 100
+            if direction == "futures_spot":
+                fr_display_val = -fr
+                fr_label = "收" if fr < 0 else ("付" if fr > 0 else "")
+            else:
+                fr_display_val = fr
+                fr_label = "收" if fr > 0 else ("付" if fr < 0 else "")
+
+            fr_pct = fr_display_val * 100
             fr_display = (
                 f"{fr_pct:+.4f}%/h/{_funding_interval_h(fr_pct)}"
                 if abs(fr_pct) < 1
                 else f"{fr_pct:+.2f}%/h/{_funding_interval_h(fr_pct)}"
-            )
-            fr_label = (
-                ("收" if fr < 0 else ("付" if fr > 0 else ""))
-                if direction == "futures_spot"
-                else ("收" if fr > 0 else ("付" if fr < 0 else ""))
             )
 
             rows.append({
