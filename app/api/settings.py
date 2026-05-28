@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -7,6 +9,7 @@ from app.runtime.executor_account_truth import SecretCipher
 from models import User, ExchangeAccount
 
 EXCHANGES = ["binance", "okx", "bybit", "gate", "bitget"]
+BALANCE_TIMEOUT = 15
 
 router = APIRouter()
 
@@ -164,38 +167,31 @@ async def get_balances(
         return {"exchanges": [], "total_usdt": 0}
 
     factory = ExchangeClientFactory()
-    exchange_balances: list[dict] = []
-    total_usdt = 0.0
 
-    for acct in accounts:
+    async def _fetch_one(acct) -> dict:
         try:
             api_key = cipher.decrypt(acct.api_key_ciphertext)
             secret = cipher.decrypt(acct.secret_ciphertext)
             if not api_key or not secret:
-                exchange_balances.append({
-                    "exchange": acct.exchange,
-                    "env_mode": acct.env_mode,
-                    "error": "missing credentials",
-                    "assets": [],
-                    "total_usdt": 0,
-                })
-                continue
+                return {"exchange": acct.exchange, "env_mode": acct.env_mode, "error": "missing credentials", "assets": [], "total_usdt": 0}
 
             creds = ExchangeCredentials(
-                api_key=api_key,
-                secret=secret,
+                api_key=api_key, secret=secret,
                 password=cipher.decrypt(acct.passphrase_ciphertext),
             )
             session = factory.create_session(
-                exchange=acct.exchange,
-                env_mode=acct.env_mode,
-                proxies={},
-                credentials=creds,
+                exchange=acct.exchange, env_mode=acct.env_mode,
+                proxies={}, credentials=creds,
             )
             try:
-                await session.mark_ready()
-                balance = await session.client.fetch_balance()
+                balance = await asyncio.wait_for(
+                    session.client.fetch_balance(),
+                    timeout=BALANCE_TIMEOUT,
+                )
                 await session.close()
+            except asyncio.TimeoutError:
+                await session.close()
+                return {"exchange": acct.exchange, "env_mode": acct.env_mode, "error": "timeout", "assets": [], "total_usdt": 0}
             except Exception:
                 await session.close()
                 raise
@@ -213,43 +209,27 @@ async def get_balances(
                     total_amount = free + used
                 if total_amount <= 1e-10:
                     continue
-                usdt_value = 0.0
-                if currency == "USDT" or currency == "USD":
+                if currency in ("USDT", "USD"):
                     usdt_value = total_amount
                 else:
                     usdt_value = await _get_usdt_price(factory, acct.exchange, acct.env_mode, currency, total_amount)
                 ex_total += usdt_value
                 assets.append({
-                    "currency": currency,
-                    "free": round(free, 8),
-                    "used": round(used, 8),
-                    "total": round(total_amount, 8),
+                    "currency": currency, "free": round(free, 8),
+                    "used": round(used, 8), "total": round(total_amount, 8),
                     "usdt_value": round(usdt_value, 2),
                 })
 
             assets.sort(key=lambda a: a["usdt_value"], reverse=True)
-            exchange_balances.append({
-                "exchange": acct.exchange,
-                "env_mode": acct.env_mode,
-                "error": None,
-                "assets": assets,
-                "total_usdt": round(ex_total, 2),
-            })
-            total_usdt += ex_total
+            return {"exchange": acct.exchange, "env_mode": acct.env_mode, "error": None, "assets": assets, "total_usdt": round(ex_total, 2)}
         except Exception as exc:
-            exchange_balances.append({
-                "exchange": acct.exchange,
-                "env_mode": acct.env_mode,
-                "error": str(exc)[:200],
-                "assets": [],
-                "total_usdt": 0,
-            })
+            return {"exchange": acct.exchange, "env_mode": acct.env_mode, "error": str(exc)[:200], "assets": [], "total_usdt": 0}
 
-    exchange_balances.sort(key=lambda e: e["total_usdt"], reverse=True)
-    return {
-        "exchanges": exchange_balances,
-        "total_usdt": round(total_usdt, 2),
-    }
+    results = await asyncio.gather(*[_fetch_one(a) for a in accounts])
+
+    exchange_balances = sorted(results, key=lambda e: e["total_usdt"], reverse=True)
+    total_usdt = sum(e["total_usdt"] for e in exchange_balances)
+    return {"exchanges": exchange_balances, "total_usdt": round(total_usdt, 2)}
 
 
 _PRICE_CACHE: dict[str, float] = {}
@@ -273,7 +253,6 @@ async def _get_usdt_price(
             env_mode=env_mode,
             proxies={},
         )
-        await session.mark_ready()
         ticker = await session.client.fetch_ticker(symbol)
         price = float(ticker.get("last", 0) or 0)
         await session.close()
