@@ -307,9 +307,15 @@ export function LeaderboardPage() {
                       {row.spot_exchange} / {row.derivative_exchange}
                     </td>
                     <td className="px-3 py-3 text-right font-mono text-xs text-gray-400">
-                      {row.spot_price || '--'}
+                      {row.spot_price || '--'}{' '}
+                      <span className="text-gray-600">
+                        ({direction === 'futures_spot' ? '期' : '现'})
+                      </span>
                       <br />
-                      {row.deriv_price || '--'}
+                      {row.deriv_price || '--'}{' '}
+                      <span className="text-gray-600">
+                        ({direction === 'futures_spot' ? '现' : '期'})
+                      </span>
                     </td>
                     <td className="px-3 py-3 font-mono text-sm text-gray-300">
                       {row.funding_rate_display}
