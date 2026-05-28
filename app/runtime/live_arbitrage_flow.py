@@ -123,7 +123,7 @@ class LiveArbitrageFlowService:
             derivative_exchange=spot_exchange,
             spot=derivative_snapshot,
             derivative=spot_snapshot,
-            funding_rate=-funding_rate,
+            funding_rate=funding_rate,
             opportunity_type="OPEN",
         )
         fs_open.direction = "futures_spot"
@@ -133,7 +133,7 @@ class LiveArbitrageFlowService:
             derivative_exchange=spot_exchange,
             spot=derivative_snapshot,
             derivative=spot_snapshot,
-            funding_rate=-funding_rate,
+            funding_rate=funding_rate,
             opportunity_type="CLOSE",
         )
         fs_close.direction = "futures_spot"

@@ -69,7 +69,11 @@ async def leaderboard_ws(
                 if abs(fr_pct) < 1
                 else f"{fr_pct:+.2f}%/h/{_funding_interval_h(fr_pct)}"
             )
-            fr_label = "收" if fr > 0 else ("付" if fr < 0 else "")
+            fr_label = (
+                ("收" if fr < 0 else ("付" if fr > 0 else ""))
+                if direction == "futures_spot"
+                else ("收" if fr > 0 else ("付" if fr < 0 else ""))
+            )
 
             rows.append({
                 "symbol": symbol.replace("/USDT", ""),

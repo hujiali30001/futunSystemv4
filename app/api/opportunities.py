@@ -88,7 +88,11 @@ async def leaderboard(
 
         sort_val = open_spread_pct
 
-        fr_label = "收" if fr > 0 else ("付" if fr < 0 else "")
+        fr_label = (
+            ("收" if fr < 0 else ("付" if fr > 0 else ""))
+            if direction == "futures_spot"
+            else ("收" if fr > 0 else ("付" if fr < 0 else ""))
+        )
 
         rows.append({
             "symbol": base_symbol,
