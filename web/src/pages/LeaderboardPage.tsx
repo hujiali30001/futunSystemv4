@@ -171,13 +171,13 @@ export function LeaderboardPage() {
           onClick={() => switchDir('spot_futures')}
           className={tabClass('spot_futures')}
         >
-          期现排行榜
+          现期排行榜
         </button>
         <button
           onClick={() => switchDir('futures_spot')}
           className={tabClass('futures_spot')}
         >
-          现期排行榜
+          期现排行榜
         </button>
       </div>
 
