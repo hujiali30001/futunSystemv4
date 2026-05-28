@@ -8,6 +8,8 @@ import {
   type Strategy,
 } from '../api'
 
+type TierRow = { spread_bps: number; ratio: number }
+
 export function StrategiesPage() {
   const [strategies, setStrategies] = useState<Strategy[]>([])
   const [loading, setLoading] = useState(true)
@@ -39,13 +41,20 @@ export function StrategiesPage() {
   const [formOpenBps, setFormOpenBps] = useState(Number(presetOpen) || 100)
   const [formCloseBps, setFormCloseBps] = useState(Number(presetClose) || 10)
   const [submitting, setSubmitting] = useState(false)
+  const [useTiers, setUseTiers] = useState(false)
+  const [openTiers, setOpenTiers] = useState<TierRow[]>([
+    { spread_bps: formOpenBps, ratio: 1.0 },
+  ])
+  const [closeTiers, setCloseTiers] = useState<TierRow[]>([
+    { spread_bps: formCloseBps, ratio: 1.0 },
+  ])
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!formName || !formSymbol || !formSpot || !formDeriv) return
     setSubmitting(true)
     try {
-      await createStrategy({
+      const body: any = {
         name: formName,
         symbol: formSymbol,
         spot_exchange: formSpot,
@@ -53,7 +62,12 @@ export function StrategiesPage() {
         target_quote_amount: formAmount,
         open_spread_bps_threshold: formOpenBps,
         close_spread_bps_threshold: formCloseBps,
-      })
+      }
+      if (useTiers) {
+        body.open_tiers_json = openTiers.filter(t => t.ratio > 0)
+        body.close_tiers_json = closeTiers.filter(t => t.ratio > 0)
+      }
+      await createStrategy(body)
       setShowForm(false)
       setFormName('')
       setFormSymbol('')
@@ -176,6 +190,129 @@ export function StrategiesPage() {
               </button>
             </div>
           </div>
+
+          <div className="mt-3 border-t border-gray-800 pt-3">
+            <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={useTiers}
+                onChange={(e) => setUseTiers(e.target.checked)}
+              />
+              多级开清仓
+            </label>
+            {useTiers && (
+              <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div>
+                  <div className="mb-1 flex items-center justify-between">
+                    <span className="text-xs text-gray-500">开仓梯度</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setOpenTiers([...openTiers, { spread_bps: 200, ratio: 1.0 }])
+                      }
+                      className="text-xs text-emerald-400 hover:underline"
+                    >
+                      + 添加
+                    </button>
+                  </div>
+                  {openTiers.map((t, i) => (
+                    <div key={i} className="mb-1 flex gap-2">
+                      <input
+                        type="number"
+                        step="1"
+                        value={t.spread_bps}
+                        onChange={(e) => {
+                          const next = [...openTiers]
+                          next[i] = { ...t, spread_bps: Number(e.target.value) }
+                          setOpenTiers(next)
+                        }}
+                        className="w-24 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-white"
+                        placeholder="bps"
+                      />
+                      <input
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        max="1"
+                        value={t.ratio}
+                        onChange={(e) => {
+                          const next = [...openTiers]
+                          next[i] = { ...t, ratio: Number(e.target.value) }
+                          setOpenTiers(next)
+                        }}
+                        className="w-20 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-white"
+                        placeholder="ratio"
+                      />
+                      {openTiers.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setOpenTiers(openTiers.filter((_, j) => j !== i))}
+                          className="text-xs text-red-400 hover:underline"
+                        >
+                          删除
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  <p className="mt-1 text-xs text-gray-600">bps 阈值  ratio 仓位比例(0-1)</p>
+                </div>
+                <div>
+                  <div className="mb-1 flex items-center justify-between">
+                    <span className="text-xs text-gray-500">清仓梯度</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCloseTiers([...closeTiers, { spread_bps: 50, ratio: 1.0 }])
+                      }
+                      className="text-xs text-emerald-400 hover:underline"
+                    >
+                      + 添加
+                    </button>
+                  </div>
+                  {closeTiers.map((t, i) => (
+                    <div key={i} className="mb-1 flex gap-2">
+                      <input
+                        type="number"
+                        step="1"
+                        value={t.spread_bps}
+                        onChange={(e) => {
+                          const next = [...closeTiers]
+                          next[i] = { ...t, spread_bps: Number(e.target.value) }
+                          setCloseTiers(next)
+                        }}
+                        className="w-24 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-white"
+                        placeholder="bps"
+                      />
+                      <input
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        max="1"
+                        value={t.ratio}
+                        onChange={(e) => {
+                          const next = [...closeTiers]
+                          next[i] = { ...t, ratio: Number(e.target.value) }
+                          setCloseTiers(next)
+                        }}
+                        className="w-20 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-white"
+                        placeholder="ratio"
+                      />
+                      {closeTiers.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setCloseTiers(closeTiers.filter((_, j) => j !== i))}
+                          className="text-xs text-red-400 hover:underline"
+                        >
+                          删除
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  <p className="mt-1 text-xs text-gray-600">bps 阈值  ratio 仓位比例(0-1)</p>
+                </div>
+              </div>
+            )}
+          </div>
         </form>
       )}
 
@@ -212,6 +349,11 @@ export function StrategiesPage() {
                   <span>资金: {s.target_quote_amount} USDT</span>
                   <span>开: {formatBps(s.open_spread_bps_threshold)}</span>
                   <span>清: {formatBps(s.close_spread_bps_threshold)}</span>
+                  {(s.open_tiers_json?.length || 0) > 1 && (
+                    <span className="text-emerald-500">
+                      {s.open_tiers_json.length}级开{(s.close_tiers_json?.length || 0) > 1 ? ` / ${s.close_tiers_json.length}级清` : ''}
+                    </span>
+                  )}
                 </div>
               </div>
               <div className="flex gap-2">

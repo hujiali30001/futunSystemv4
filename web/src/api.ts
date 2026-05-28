@@ -83,6 +83,9 @@ export interface Strategy {
   target_quote_amount: number
   open_spread_bps_threshold: number
   close_spread_bps_threshold: number
+  open_tiers_json: { spread_bps: number; ratio: number }[]
+  close_tiers_json: { spread_bps: number; ratio: number }[]
+  max_single_task_notional: number
   is_enabled: boolean
 }
 
@@ -146,6 +149,9 @@ export async function createStrategy(body: {
   target_quote_amount: number
   open_spread_bps_threshold: number
   close_spread_bps_threshold: number
+  open_tiers_json?: { spread_bps: number; ratio: number }[]
+  close_tiers_json?: { spread_bps: number; ratio: number }[]
+  max_single_task_notional?: number
 }) {
   const { data } = await api.post<Strategy>('/strategies', body)
   return data
@@ -158,6 +164,9 @@ export async function updateStrategy(
     target_quote_amount: number
     open_spread_bps_threshold: number
     close_spread_bps_threshold: number
+    open_tiers_json: { spread_bps: number; ratio: number }[]
+    close_tiers_json: { spread_bps: number; ratio: number }[]
+    max_single_task_notional: number
   }>,
 ) {
   const { data } = await api.put<Strategy>(`/strategies/${id}`, body)

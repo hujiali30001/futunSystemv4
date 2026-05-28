@@ -1806,6 +1806,16 @@ class RedisArbitrageTaskDispatcher:
             coverage["has_exchange_coverage"] and coverage["has_auto_trade_coverage"]
         )
 
+    @staticmethod
+    def _pick_best_tier(tiers: list | None, spread_bps: float) -> dict | None:
+        if not tiers:
+            return None
+        candidates = [t for t in tiers if float(t.get("spread_bps", 0)) <= spread_bps]
+        if not candidates:
+            return None
+        candidates.sort(key=lambda t: float(t.get("spread_bps", 0)), reverse=True)
+        return candidates[0]
+
     def _iter_matching_strategies(self, *, user_id: str, payload: dict[str, Any]):
         if self.strategy_repository is None:
             return [None]
@@ -1821,6 +1831,8 @@ class RedisArbitrageTaskDispatcher:
             str(payload["derivative_exchange"]),
         }
         open_spread_bps = float(payload.get("open_spread_bps", 0.0))
+        close_spread_bps = float(payload.get("close_spread_bps", 0.0))
+        opportunity_type = str(payload.get("opportunity_type", "OPEN"))
         for strategy in strategies:
             symbols = list(getattr(strategy, "symbol_scope_json", []) or [])
             exchanges = set(getattr(strategy, "exchange_scope_json", []) or [])
@@ -1828,14 +1840,40 @@ class RedisArbitrageTaskDispatcher:
                 continue
             if exchanges and (payload_exchanges - exchanges):
                 continue
-            threshold = float(getattr(strategy, "open_spread_bps_threshold", 0.0) or 0.0)
-            if (
-                str(payload["opportunity_type"]) == "OPEN"
-                and open_spread_bps < threshold
-            ):
-                continue
+            if opportunity_type == "OPEN":
+                tiers = getattr(strategy, "open_tiers_json", []) or []
+                if tiers:
+                    if not RedisArbitrageTaskDispatcher._pick_best_tier(tiers, open_spread_bps):
+                        continue
+                else:
+                    threshold = float(getattr(strategy, "open_spread_bps_threshold", 0.0) or 0.0)
+                    if open_spread_bps < threshold:
+                        continue
+            elif opportunity_type == "CLOSE":
+                tiers = getattr(strategy, "close_tiers_json", []) or []
+                if tiers:
+                    if not RedisArbitrageTaskDispatcher._pick_best_tier(tiers, close_spread_bps):
+                        continue
             matched.append(strategy)
         return matched
+
+    def _resolve_target_notional(self, *, strategy, task_type: str, payload: dict[str, Any]) -> float:
+        if strategy is None:
+            return 0.0
+        base_amount = float(getattr(strategy, "target_quote_amount", 0.0) or 0.0)
+        max_notional = float(getattr(strategy, "max_single_task_notional", 0.0) or 0.0)
+        if task_type == "open":
+            tiers = getattr(strategy, "open_tiers_json", []) or []
+            spread_bps = float(payload.get("open_spread_bps", 0.0))
+        else:
+            tiers = getattr(strategy, "close_tiers_json", []) or []
+            spread_bps = float(payload.get("close_spread_bps", 0.0))
+        tier = RedisArbitrageTaskDispatcher._pick_best_tier(tiers, spread_bps)
+        ratio = float(tier["ratio"]) if tier else 1.0
+        target_notional = base_amount * ratio
+        if max_notional > 0:
+            target_notional = min(target_notional, max_notional)
+        return target_notional
 
     def _create_arbitrage_task(
         self,
@@ -1863,10 +1901,10 @@ class RedisArbitrageTaskDispatcher:
                 symbol=str(payload["symbol"]),
                 spot_exchange=str(payload["spot_exchange"]),
                 derivative_exchange=str(payload["derivative_exchange"]),
-                target_notional=(
-                    0.0
-                    if strategy is None
-                    else float(getattr(strategy, "target_quote_amount", 0.0) or 0.0)
+                target_notional=self._resolve_target_notional(
+                    strategy=strategy,
+                    task_type=task_type,
+                    payload=payload,
                 ),
                 expected_spread_bps=(
                     float(payload.get("open_spread_bps", 0.0))

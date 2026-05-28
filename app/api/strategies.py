@@ -16,6 +16,9 @@ class StrategyCreate(BaseModel):
     target_quote_amount: float = 100.0
     open_spread_bps_threshold: float = 100.0
     close_spread_bps_threshold: float = 10.0
+    open_tiers_json: list | None = None
+    close_tiers_json: list | None = None
+    max_single_task_notional: float | None = None
 
 
 class StrategyUpdate(BaseModel):
@@ -23,6 +26,9 @@ class StrategyUpdate(BaseModel):
     target_quote_amount: float | None = None
     open_spread_bps_threshold: float | None = None
     close_spread_bps_threshold: float | None = None
+    open_tiers_json: list | None = None
+    close_tiers_json: list | None = None
+    max_single_task_notional: float | None = None
 
 
 def _strategy_to_dict(s: StrategyConfig) -> dict:
@@ -37,6 +43,7 @@ def _strategy_to_dict(s: StrategyConfig) -> dict:
         "close_spread_bps_threshold": s.close_spread_bps_threshold,
         "open_tiers_json": s.open_tiers_json,
         "close_tiers_json": s.close_tiers_json,
+        "max_single_task_notional": s.max_single_task_notional,
         "is_enabled": s.is_enabled,
     }
 
@@ -70,8 +77,11 @@ def create_strategy(
         target_quote_amount=body.target_quote_amount,
         open_spread_bps_threshold=body.open_spread_bps_threshold,
         close_spread_bps_threshold=body.close_spread_bps_threshold,
-        open_tiers_json=[{"spread_bps": body.open_spread_bps_threshold, "ratio": 1.0}],
-        close_tiers_json=[{"spread_bps": body.close_spread_bps_threshold, "ratio": 1.0}],
+        open_tiers_json=body.open_tiers_json
+        or [{"spread_bps": body.open_spread_bps_threshold, "ratio": 1.0}],
+        close_tiers_json=body.close_tiers_json
+        or [{"spread_bps": body.close_spread_bps_threshold, "ratio": 1.0}],
+        max_single_task_notional=body.max_single_task_notional or 0.0,
         is_enabled=True,
     )
     db.add(strategy)
