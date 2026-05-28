@@ -24,7 +24,8 @@ async def leaderboard_ws(
             spot = fields.get("spot_exchange", "")
             deriv = fields.get("derivative_exchange", "")
             otype = fields.get("opportunity_type", "OPEN")
-            key = (symbol, spot, deriv, otype)
+            fdir = fields.get("direction", "spot_futures")
+            key = (symbol, spot, deriv, otype, fdir)
             if key not in latest:
                 try:
                     latest[key] = {
@@ -34,19 +35,20 @@ async def leaderboard_ws(
                         "open_spread_bps": float(fields.get("open_spread_bps", 0)),
                         "close_spread_bps": float(fields.get("close_spread_bps", 0)),
                         "funding_rate": float(fields.get("funding_rate", 0)),
+                        "direction": fdir,
                     }
                 except (ValueError, TypeError):
                     pass
 
         paired: dict = {}
-        for (symbol, spot, deriv, otype), entry in latest.items():
-            pk = (symbol, spot, deriv)
+        for (symbol, spot, deriv, otype, fdir), entry in latest.items():
+            pk = (symbol, spot, deriv, fdir)
             if pk not in paired:
                 paired[pk] = {}
             paired[pk][otype] = entry
 
         rows = []
-        for (symbol, spot, deriv), entry_by_type in paired.items():
+        for (symbol, spot, deriv, fdir), entry_by_type in paired.items():
             open_entry = entry_by_type.get("OPEN")
             close_entry = entry_by_type.get("CLOSE", open_entry)
             if open_entry is None:
@@ -66,11 +68,6 @@ async def leaderboard_ws(
                 else f"{fr_pct:+.2f}%/h/{_funding_interval_h(fr_pct)}"
             )
             fr_label = "收" if fr > 0 else ("付" if fr < 0 else "")
-
-            if direction == "futures_spot":
-                open_pct, close_pct = close_pct, open_pct
-                fr = -fr
-                spot, deriv = deriv, spot
 
             rows.append({
                 "symbol": symbol.replace("/USDT", ""),

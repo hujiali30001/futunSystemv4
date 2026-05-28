@@ -22,6 +22,7 @@ class ArbitrageOpportunity:
     annualized_bps: float
     redis_member: str
     timestamp: float
+    direction: str = "spot_futures"
 
 
 def arbitrage_opportunity_to_payload(
@@ -38,6 +39,7 @@ def arbitrage_opportunity_to_payload(
         "annualized_bps": opportunity.annualized_bps,
         "redis_member": opportunity.redis_member,
         "timestamp": opportunity.timestamp,
+        "direction": opportunity.direction,
     }
 
 
@@ -111,6 +113,7 @@ class OpportunityCalculator:
                 f"{opportunity_type}:{int(current_time * 1000)}"
             ),
             timestamp=current_time,
+            direction="spot_futures",
         )
 
     def build_opportunity(

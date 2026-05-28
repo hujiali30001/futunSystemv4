@@ -28,13 +28,14 @@ async def leaderboard(
 ):
     raw = await redis.xrevrange("stream:opportunities", "+", "-", count=12000)
 
-    latest: dict[tuple[str, str, str, str], dict] = {}
+    latest: dict[tuple[str, str, str, str, str], dict] = {}
     for msg_id, fields in raw:
         symbol = fields.get("symbol", "")
         spot = fields.get("spot_exchange", "")
         deriv = fields.get("derivative_exchange", "")
         otype = fields.get("opportunity_type", "OPEN")
-        key = (symbol, spot, deriv, otype)
+        fdir = fields.get("direction", "spot_futures")
+        key = (symbol, spot, deriv, otype, fdir)
         if key not in latest:
             try:
                 latest[key] = {
@@ -45,19 +46,20 @@ async def leaderboard(
                     "open_spread_bps": float(fields.get("open_spread_bps", 0)),
                     "close_spread_bps": float(fields.get("close_spread_bps", 0)),
                     "funding_rate": float(fields.get("funding_rate", 0)),
+                    "direction": fdir,
                 }
             except (ValueError, TypeError):
                 pass
 
-    paired: dict[tuple[str, str, str], dict] = {}
-    for (symbol, spot, deriv, otype), entry in latest.items():
-        pk = (symbol, spot, deriv)
+    paired: dict[tuple[str, str, str, str], dict] = {}
+    for (symbol, spot, deriv, otype, fdir), entry in latest.items():
+        pk = (symbol, spot, deriv, fdir)
         if pk not in paired:
             paired[pk] = {}
         paired[pk][otype] = entry
 
     rows = []
-    for (symbol, spot, deriv), entry_by_type in paired.items():
+    for (symbol, spot, deriv, fdir), entry_by_type in paired.items():
         open_entry = entry_by_type.get("OPEN")
         close_entry = entry_by_type.get("CLOSE", open_entry)
         if open_entry is None:
@@ -82,19 +84,7 @@ async def leaderboard(
             else f"{fr_pct:+.2f}%/h/{_funding_interval_h(fr_pct)}"
         )
 
-        if direction == "spot_futures":
-            sort_val = open_spread_pct
-        else:
-            open_spread_pct, close_spread_pct = close_spread_pct, open_spread_pct
-            fr = -fr
-            fr_pct = fr * 100
-            fr_display = (
-                f"{fr_pct:+.4f}%/h/{_funding_interval_h(fr_pct)}"
-                if abs(fr_pct) < 1
-                else f"{fr_pct:+.2f}%/h/{_funding_interval_h(fr_pct)}"
-            )
-            spot, deriv = deriv, spot
-            sort_val = open_spread_pct
+        sort_val = open_spread_pct
 
         fr_label = "收" if fr > 0 else ("付" if fr < 0 else "")
 

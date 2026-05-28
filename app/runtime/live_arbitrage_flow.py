@@ -95,7 +95,7 @@ class LiveArbitrageFlowService:
         self._ensure_snapshot(spot_snapshot, name="spot_snapshot")
         self._ensure_snapshot(derivative_snapshot, name="derivative_snapshot")
 
-        open_opportunity = self.calculator.build_arbitrage_opportunity(
+        open_opp = self.calculator.build_arbitrage_opportunity(
             symbol=symbol,
             spot_exchange=spot_exchange,
             derivative_exchange=derivative_exchange,
@@ -104,7 +104,7 @@ class LiveArbitrageFlowService:
             funding_rate=funding_rate,
             opportunity_type="OPEN",
         )
-        close_opportunity = self.calculator.build_arbitrage_opportunity(
+        close_opp = self.calculator.build_arbitrage_opportunity(
             symbol=symbol,
             spot_exchange=spot_exchange,
             derivative_exchange=derivative_exchange,
@@ -114,9 +114,9 @@ class LiveArbitrageFlowService:
             opportunity_type="CLOSE",
         )
 
-        await self.publisher.publish(open_opportunity)
-        await self.publisher.publish(close_opportunity)
-        return open_opportunity, close_opportunity
+        await self.publisher.publish(open_opp)
+        await self.publisher.publish(close_opp)
+        return open_opp, close_opp
 
     @staticmethod
     def _ensure_snapshot(snapshot: object, *, name: str) -> None:
