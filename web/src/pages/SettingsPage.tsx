@@ -7,18 +7,21 @@ import {
   deleteExchangeAccount,
   getBalances,
   liquidateAssets,
+  getRiskStatus,
   type UserSettings,
   type SmtpSettings,
   type BalancesData,
   type LiquidateResult,
+  type RiskStatus,
 } from '../api'
 
-type Tab = 'notify' | 'api' | 'balance'
+type Tab = 'notify' | 'api' | 'balance' | 'risk'
 
 const TABS: { key: Tab; label: string; icon: string }[] = [
   { key: 'notify', label: '通知设置', icon: '🔔' },
   { key: 'api', label: 'API 管理', icon: '🔑' },
   { key: 'balance', label: '资产预览', icon: '💰' },
+  { key: 'risk', label: '风险控制', icon: '🛡️' },
 ]
 
 const EXCHANGES = ['binance', 'okx', 'bybit', 'gate', 'bitget']
@@ -169,9 +172,95 @@ export function SettingsPage() {
       {tab === 'notify' && <NotifyTab email={email} setEmail={setEmail} feishu={feishu} setFeishu={setFeishu} smtp={smtp} setSmtp={setSmtp} saving={saving} onSave={saveProfile} />}
       {tab === 'api' && <ApiTab settings={settings} editEx={editEx} setEditEx={setEditEx} exForm={exForm} setExForm={setExForm} onSave={handleExchangeSave} onDelete={handleDelete} />}
       {tab === 'balance' && <BalanceTab balances={balances} loadingBal={loadingBal} onRefresh={refreshBalance} liquidating={liquidating} liquidateResult={liquidateResult} showLiqConfirm={showLiqConfirm} setShowLiqConfirm={setShowLiqConfirm} onLiquidate={handleLiquidate} closeResult={() => setLiquidateResult(null)} />}
+      {tab === 'risk' && <RiskTab />}
     </div>
   )
 }
+
+
+function RiskTab() {
+  const [status, setStatus] = useState<RiskStatus | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    getRiskStatus().then(setStatus).catch(() => {}).finally(() => setLoading(false))
+  }, [])
+
+  if (loading) return <div className="rounded-lg border border-gray-800 bg-gray-900 p-6 text-gray-500">加载中...</div>
+  if (!status) return <div className="rounded-lg border border-gray-800 bg-gray-900 p-6 text-gray-500">无法获取风险状态</div>
+
+  return (
+    <div className="space-y-4">
+      <div className={`rounded-lg border p-4 ${status.can_open_new_positions ? 'border-emerald-800 bg-emerald-900/20' : 'border-red-800 bg-red-900/20'}`}>
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium">交易状态</span>
+          <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${status.can_open_new_positions ? 'bg-emerald-700 text-emerald-200' : 'bg-red-700 text-red-200'}`}>
+            {status.can_open_new_positions ? '允许开仓' : '禁止开仓'}
+          </span>
+        </div>
+        <p className="mt-1 text-xs text-gray-400">
+          {status.can_open_new_positions ? '当前可以执行新的交易策略' : '已触发风控限制，新交易已被拦截'}
+        </p>
+      </div>
+
+      <div className="rounded-lg border border-gray-800 bg-gray-900 p-4">
+        <h3 className="mb-3 text-sm font-medium text-gray-300">今日盈亏</h3>
+        <div className="flex items-baseline gap-3">
+          <span className={`text-2xl font-bold ${(status.daily_loss.realized_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+            {((status.daily_loss.realized_pnl || 0) >= 0 ? '+' : '')}{(status.daily_loss.realized_pnl || 0).toFixed(2)}
+          </span>
+          <span className="text-xs text-gray-500">USDT 已实现</span>
+        </div>
+        {status.daily_loss.limit_usdt != null && (
+          <div className="mt-3">
+            <div className="mb-1 flex justify-between text-xs">
+              <span className="text-gray-500">日亏损上限</span>
+              <span className={status.daily_loss.exceeded ? 'text-red-400 font-bold' : 'text-gray-400'}>
+                {status.daily_loss.limit_usdt.toFixed(0)} USDT
+              </span>
+            </div>
+            <div className="h-2 w-full rounded-full bg-gray-800">
+              <div
+                className={`h-2 rounded-full transition-all ${status.daily_loss.exceeded ? 'bg-red-500' : status.daily_loss.realized_pnl >= 0 ? 'bg-emerald-500' : 'bg-amber-500'}`}
+                style={{ width: `${Math.min(100, Math.max(0, status.daily_loss.limit_usdt ? Math.abs(status.daily_loss.realized_pnl) / status.daily_loss.limit_usdt * 100 : 0))}%` }}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {status.stop_loss_alerts.length > 0 && (
+        <div className="rounded-lg border border-gray-800 bg-gray-900 p-4">
+          <h3 className="mb-3 text-sm font-medium text-gray-300">止损监控</h3>
+          <div className="space-y-2">
+            {status.stop_loss_alerts.map((a, i) => (
+              <div key={i} className={`flex items-center justify-between rounded-md px-3 py-2 ${a.triggered ? 'bg-red-900/40 border border-red-800' : 'bg-gray-800/50'}`}>
+                <div>
+                  <p className="text-sm text-gray-200">{a.strategy_name}</p>
+                  <p className="text-xs text-gray-500">止损线: -{a.max_loss_usdt} USDT</p>
+                </div>
+                <div className="text-right">
+                  <p className={`text-sm font-mono ${a.current_unrealized_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {a.current_unrealized_pnl.toFixed(2)}
+                  </p>
+                  {a.triggered && <p className="text-xs font-bold text-red-400">触发止损!</p>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {status.stop_loss_alerts.length === 0 && (
+        <div className="rounded-lg border border-dashed border-gray-700 py-8 text-center">
+          <p className="text-sm text-gray-500">暂未设置止损策略</p>
+          <p className="mt-1 text-xs text-gray-600">在策略中添加 max_loss_usdt 即可启用止损保护</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
 
 function NotifyTab({
   email, setEmail, feishu, setFeishu, smtp, setSmtp, saving, onSave,

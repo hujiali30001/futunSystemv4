@@ -104,6 +104,7 @@ class StrategyConfig(TimestampMixin, Base):
     open_tiers_json: Mapped[list] = mapped_column(JSON, default=list)
     close_tiers_json: Mapped[list] = mapped_column(JSON, default=list)
     max_single_task_notional: Mapped[float] = mapped_column(Float, default=100.0)
+    max_loss_usdt: Mapped[float | None] = mapped_column(Float, nullable=True)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
 

@@ -502,6 +502,18 @@ export interface TradeToggleResponse {
   is_trading_enabled: boolean
 }
 
+export interface RiskStatus {
+  daily_loss: { today_date: string; realized_pnl: number; limit_usdt: number | null; exceeded: boolean }
+  stop_loss_alerts: { strategy_id: number; strategy_name: string; max_loss_usdt: number; current_unrealized_pnl: number; triggered: boolean }[]
+  can_open_new_positions: boolean
+  checked_at: string
+}
+
+export async function getRiskStatus() {
+  const { data } = await api.get<RiskStatus>('/risk/status')
+  return data
+}
+
 export function tradeToggle(): Promise<TradeToggleResponse> {
   return api.patch('/auth/me/trade-toggle').then((res) => res.data)
 }

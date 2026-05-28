@@ -25,6 +25,7 @@ app.add_middleware(
 
 from app.api import auth, opportunities, positions, settings, strategies, tasks, ws  # noqa: E402,F401
 from app.api import admin  # noqa: E402
+from app.risk import api as risk_api  # noqa: E402
 
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(opportunities.router, prefix="/api/opportunities", tags=["opportunities"])
@@ -34,6 +35,7 @@ app.include_router(strategies.router, prefix="/api/strategies", tags=["strategie
 app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"])
 app.include_router(ws.router, prefix="/api/ws", tags=["ws"])
 app.include_router(admin.router, prefix="/api")
+app.include_router(risk_api.router, prefix="/api/risk", tags=["risk"])
 
 _web_dir = Path(__file__).resolve().parent.parent.parent / "web" / "dist"
 _index = _web_dir / "index.html"

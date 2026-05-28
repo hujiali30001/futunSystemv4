@@ -31,7 +31,7 @@ if (-not $SkipFrontend) {
 
 if (-not $SkipBackend) {
     Write-Host "[deploy] Uploading backend..." -ForegroundColor Cyan
-    & scp -i $SshKey -o StrictHostKeyChecking=no -r "app/api" "${sshTarget}:${ServerPath}/app/"
+    & scp -i $SshKey -o StrictHostKeyChecking=no -r "app" "${sshTarget}:${ServerPath}/"
 }
 
 Write-Host "[restart] Restarting $ServiceName..." -ForegroundColor Cyan

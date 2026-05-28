@@ -19,6 +19,7 @@ class StrategyCreate(BaseModel):
     open_tiers_json: list | None = None
     close_tiers_json: list | None = None
     max_single_task_notional: float | None = None
+    max_loss_usdt: float | None = None
 
 
 class StrategyUpdate(BaseModel):
@@ -29,6 +30,7 @@ class StrategyUpdate(BaseModel):
     open_tiers_json: list | None = None
     close_tiers_json: list | None = None
     max_single_task_notional: float | None = None
+    max_loss_usdt: float | None = None
 
 
 def _strategy_to_dict(s: StrategyConfig) -> dict:
@@ -44,6 +46,7 @@ def _strategy_to_dict(s: StrategyConfig) -> dict:
         "open_tiers_json": s.open_tiers_json,
         "close_tiers_json": s.close_tiers_json,
         "max_single_task_notional": s.max_single_task_notional,
+        "max_loss_usdt": s.max_loss_usdt,
         "is_enabled": s.is_enabled,
     }
 
@@ -82,6 +85,7 @@ def create_strategy(
         close_tiers_json=body.close_tiers_json
         or [{"spread_bps": body.close_spread_bps_threshold, "ratio": 1.0}],
         max_single_task_notional=body.max_single_task_notional or 0.0,
+        max_loss_usdt=body.max_loss_usdt,
         is_enabled=True,
     )
     db.add(strategy)
