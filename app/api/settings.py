@@ -183,19 +183,35 @@ async def get_balances(
                 exchange=acct.exchange, env_mode=acct.env_mode,
                 proxies={}, credentials=creds,
             )
+
+            major = ["BTC","ETH","SOL","USDC","BNB","XRP","DOGE","ADA","DOT","LINK","LTC","AVAX","TRX","SUI","TON","APT","ARB","ATOM","NEAR","OP","INJ","FET","RUNE","TIA","SEI","JUP","PYTH","WIF","WLD","STRK","ENA","ONDO","PEPE","SHIB","AAVE","SAND","MANA","THETA","GRT","STX","FIL","ICP","RENDER","TAO","KAS","MNT","ZRO","PENDLE","EIGEN","SAFE","MOVE","BERA","IP","KAITO","SONIC","ANIME","STORY","ME","TRUMP","VIRTUAL","AI16Z","AIXBT","FARTCOIN","MORPHO","VINE","MELANIA","PENGU","MODE","RAY","CRV","UNI","FLOW","OM","HNT","LDO","HBAR","IMX","ZEC","XTZ","1INCH","COMP","ETC","EGLD","ZIL","BCH","DYDX","APE","AXS","SAND","ALGO","MKR","SNX","BONK"]
+            major_symbols = list(dict.fromkeys(f"{c}/USDT" for c in major))
+
+            async def _get_balance():
+                return await asyncio.wait_for(session.client.fetch_balance(), timeout=BALANCE_TIMEOUT)
+
+            async def _get_tickers():
+                pub = factory.create_session(exchange=acct.exchange, env_mode=acct.env_mode, proxies={})
+                try:
+                    return await asyncio.wait_for(pub.client.fetch_tickers(major_symbols), timeout=BALANCE_TIMEOUT)
+                finally:
+                    await pub.close()
+
+            balance_task = asyncio.create_task(_get_balance())
+            tickers_task = asyncio.create_task(_get_tickers())
+
             try:
-                balance = await asyncio.wait_for(
-                    session.client.fetch_balance(),
-                    timeout=BALANCE_TIMEOUT,
-                )
+                balance = await balance_task
             except asyncio.TimeoutError:
+                tickers_task.cancel()
                 await session.close()
                 return {"exchange": acct.exchange, "env_mode": acct.env_mode, "error": "timeout", "assets": [], "total_usdt": 0}
             except Exception:
+                tickers_task.cancel()
                 await session.close()
                 raise
 
-            non_usdt: list[str] = []
+            missing: list[str] = []
             assets_raw: list[dict] = []
             for currency, info in (balance.get("total") or {}).items():
                 if isinstance(info, (int, float)):
@@ -211,24 +227,28 @@ async def get_balances(
                 if currency in ("USDT", "USD"):
                     usdt_value = total_amount
                 else:
-                    usdt_value = 0.0
-                    non_usdt.append(currency)
-                assets_raw.append({"currency": currency, "free": round(free, 8), "used": round(used, 8), "total": round(total_amount, 8), "usdt_value": round(usdt_value, 2)})
+                    usdt_value = None
+                    missing.append(currency)
+                assets_raw.append({"currency": currency, "free": round(free, 8), "used": round(used, 8), "total": round(total_amount, 8), "usdt_value": usdt_value})
 
-            if non_usdt:
-                symbols = [f"{c}/USDT" for c in non_usdt]
+            if missing:
                 try:
-                    tickers = await asyncio.wait_for(
-                        session.client.fetch_tickers(symbols),
-                        timeout=BALANCE_TIMEOUT,
-                    )
-                    for a in assets_raw:
-                        if a["currency"] in ("USDT", "USD"):
-                            continue
-                        t = tickers.get(f"{a['currency']}/USDT", {})
-                        p = float(t.get("last", 0) or 0)
-                        a["usdt_value"] = round(p * a["total"], 2)
+                    tickers = await tickers_task
                 except Exception:
+                    tickers = {}
+
+                still_missing: list[str] = []
+                for a in assets_raw:
+                    if a["usdt_value"] is not None:
+                        continue
+                    t = tickers.get(f"{a['currency']}/USDT", {})
+                    p = float(t.get("last", 0) or 0)
+                    if p > 0:
+                        a["usdt_value"] = round(p * a["total"], 2)
+                    else:
+                        still_missing.append(a["currency"])
+
+                if still_missing:
                     sem = asyncio.Semaphore(5)
                     async def _price_one(cur):
                         async with sem:
@@ -237,15 +257,15 @@ async def get_balances(
                                 return float(t.get("last", 0) or 0)
                             except Exception:
                                 return 0.0
-                    prices = dict(zip(non_usdt, await asyncio.gather(*[_price_one(c) for c in non_usdt])))
+                    prices = dict(zip(still_missing, await asyncio.gather(*[_price_one(c) for c in still_missing])))
                     for a in assets_raw:
-                        if a["currency"] in ("USDT", "USD"):
+                        if a["usdt_value"] is not None:
                             continue
                         a["usdt_value"] = round(prices.get(a["currency"], 0) * a["total"], 2)
 
             await session.close()
 
-            assets = [a for a in assets_raw if a["usdt_value"] > 0.005]
+            assets = [a for a in assets_raw if a["usdt_value"] is not None and a["usdt_value"] > 0.005]
             assets.sort(key=lambda a: a["usdt_value"], reverse=True)
             ex_total = sum(a["usdt_value"] for a in assets)
             return {"exchange": acct.exchange, "env_mode": acct.env_mode, "error": None, "assets": assets, "total_usdt": round(ex_total, 2)}
