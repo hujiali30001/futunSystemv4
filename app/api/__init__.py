@@ -23,28 +23,13 @@ async def lifespan(application: FastAPI):
 async def _startup_init():
     await asyncio.sleep(3)
     try:
-        loop = asyncio.get_running_loop()
-        from app.api.deps import _session_factory
-        await loop.run_in_executor(None, _ensure_column, _session_factory)
         from app.risk.scanner import init_scanner
+        from app.api.deps import _session_factory
         scanner = init_scanner(_session_factory)
         await scanner.run()
     except Exception:
         import logging
         logging.getLogger("uvicorn").exception("startup init failed")
-
-
-def _ensure_column(session_factory):
-    try:
-        db = session_factory()
-        with db.connection() as conn:
-            conn.exec_driver_sql(
-                "ALTER TABLE strategy_configs ADD COLUMN IF NOT EXISTS max_loss_usdt FLOAT"
-            )
-            db.commit()
-        db.close()
-    except Exception:
-        pass
 
 
 app = FastAPI(title="FuRun API", version="0.1.0", lifespan=lifespan)
