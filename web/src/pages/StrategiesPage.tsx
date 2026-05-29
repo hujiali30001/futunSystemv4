@@ -12,9 +12,9 @@ import { TierBar } from '../components/TierBar'
 
 type TierRow = { spread_bps: number; ratio: number }
 
-function resetForm(presetSymbol = '', presetSpot = '', presetDeriv = '', presetOpen = 0, presetClose = 0) {
+function resetForm(presetSymbol = '', presetSpot = '', presetDeriv = '', presetOpen = 0, presetClose = 0, presetName = '') {
   return {
-    name: '',
+    name: presetName,
     symbol: presetSymbol,
     spot: presetSpot,
     deriv: presetDeriv,
@@ -48,10 +48,11 @@ export function StrategiesPage() {
   const presetDeriv = searchParams.get('derivative_exchange')
   const presetOpen = Number(searchParams.get('open_spread_bps'))
   const presetClose = Number(searchParams.get('close_spread_bps'))
+  const presetName = searchParams.get('name') || ''
 
   const [editingId, setEditingId] = useState<number | null>(null)
   const [showForm, setShowForm] = useState(!!presetSymbol)
-  const [form, setForm] = useState(resetForm(presetSymbol || '', presetSpot || '', presetDeriv || '', presetOpen, presetClose))
+  const [form, setForm] = useState(resetForm(presetSymbol || '', presetSpot || '', presetDeriv || '', presetOpen, presetClose, presetName))
   const [submitting, setSubmitting] = useState(false)
 
   const openNew = () => {

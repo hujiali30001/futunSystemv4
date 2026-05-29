@@ -285,7 +285,10 @@ export function DashboardPage() {
                         {r.deriv_volume || '--'}<span className="text-gray-600 ml-0.5">期</span>
                       </td>
                       <td className="px-3 py-2.5 text-center">
-                        <button onClick={() => navigate(`/strategies?symbol=${r.symbol}&spot=${r.spot_exchange}&deriv=${r.derivative_exchange}&open_spread_bps=${Math.round(r.open_spread_pct * 100)}&close_spread_bps=${Math.round(r.close_spread_pct * 100)}`)}
+                        <button onClick={() => {
+                          const name = `${r.symbol} 期现 ${r.spot_exchange}→${r.derivative_exchange}`
+                          navigate(`/strategies?symbol=${r.symbol}&spot_exchange=${r.spot_exchange}&derivative_exchange=${r.derivative_exchange}&open_spread_bps=${Math.round(r.open_spread_pct * 100)}&close_spread_bps=${Math.round(r.close_spread_pct * 100)}&name=${encodeURIComponent(name)}`)
+                        }}
                           className="rounded bg-emerald-800/50 px-2.5 py-1 text-xs text-emerald-400 hover:bg-emerald-700/50 transition">
                           套利
                         </button>

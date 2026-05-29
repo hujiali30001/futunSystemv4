@@ -134,12 +134,15 @@ export function LeaderboardPage() {
   }, [token])
 
   const handleStart = (row: LeaderboardRow) => {
+    const symbol = row.full_symbol.replace('/USDT', '')
+    const name = `${symbol} 期现 ${row.spot_exchange}→${row.derivative_exchange}`
     const params = new URLSearchParams({
       symbol: row.full_symbol,
       spot_exchange: row.spot_exchange,
       derivative_exchange: row.derivative_exchange,
       open_spread_bps: String(Math.round(row.open_spread_pct * 100)),
       close_spread_bps: String(Math.round(row.close_spread_pct * 100)),
+      name,
     })
     navigate(`/strategies?${params.toString()}`)
   }
