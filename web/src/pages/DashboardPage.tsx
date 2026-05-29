@@ -60,7 +60,7 @@ export function DashboardPage() {
     const [s, r, lb, me] = await Promise.all([
       getDashboardSummary().catch(() => null),
       getRiskStatus().catch(() => null),
-      getLeaderboard({ direction: 'spot_futures', page: 1, page_size: 500 }),
+      getLeaderboard({ direction: 'spot_futures', page: 1, page_size: 10000 }),
       getMe().catch(() => null),
     ])
     setSummary(s)
