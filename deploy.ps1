@@ -8,11 +8,27 @@ param(
     [switch]$SkipBackend
 )
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $projectRoot
 
 $sshTarget = "${User}@${HostName}"
+$sshKeyPath = (Resolve-Path $SshKey).Path
+
+$commonArgs = "-i `"$sshKeyPath`" -o StrictHostKeyChecking=no -o PasswordAuthentication=no -o BatchMode=yes"
+
+function do_ssh([string]$cmd) {
+    $full = "ssh -n -T $commonArgs $sshTarget `"$cmd`""
+    cmd /c "$full"
+    if ($LASTEXITCODE -ne 0) { Write-Host "[WARN] ssh exit=$LASTEXITCODE" -ForegroundColor Yellow }
+}
+
+function do_scp([string]$src, [string]$dst, [switch]$Recurse) {
+    $r = if ($Recurse) { "-r" } else { "" }
+    $full = "scp $r $commonArgs `"$src`" `"$dst`""
+    cmd /c "$full"
+    if ($LASTEXITCODE -ne 0) { Write-Host "[WARN] scp exit=$LASTEXITCODE" -ForegroundColor Yellow }
+}
 
 if (-not $SkipFrontend) {
     Write-Host "[build] Building frontend..." -ForegroundColor Cyan
@@ -23,30 +39,29 @@ if (-not $SkipFrontend) {
     $cssFile = Get-ChildItem "web/dist/assets/index-*.css" | Select-Object -First 1
 
     Write-Host "[deploy] Uploading frontend..." -ForegroundColor Cyan
-    & scp -i $SshKey -o StrictHostKeyChecking=no "web/dist/index.html" "${sshTarget}:${ServerPath}/web/dist/"
-    & ssh -i $SshKey -o StrictHostKeyChecking=no $sshTarget "rm -f ${ServerPath}/web/dist/assets/index-*"
-    & scp -i $SshKey -o StrictHostKeyChecking=no $jsFile.FullName  "${sshTarget}:${ServerPath}/web/dist/assets/"
-    & scp -i $SshKey -o StrictHostKeyChecking=no $cssFile.FullName "${sshTarget}:${ServerPath}/web/dist/assets/"
+    do_scp "web/dist/index.html" "${sshTarget}:${ServerPath}/web/dist/"
+    do_ssh "rm -f ${ServerPath}/web/dist/assets/*"
+    do_scp $jsFile.FullName  "${sshTarget}:${ServerPath}/web/dist/assets/"
+    do_scp $cssFile.FullName "${sshTarget}:${ServerPath}/web/dist/assets/"
 }
 
 if (-not $SkipBackend) {
     Write-Host "[deploy] Uploading backend..." -ForegroundColor Cyan
-    & scp -i $SshKey -o StrictHostKeyChecking=no -r "app" "${sshTarget}:${ServerPath}/"
+    do_scp -Recurse "app" "${sshTarget}:${ServerPath}/"
 }
 
 Write-Host "[restart] Restarting $ServiceName..." -ForegroundColor Cyan
-$remoteCmd = @"
-find ${ServerPath} -name '*.pyc' -delete
-sudo systemctl restart ${ServiceName}
-sleep 5
-curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/
-"@
+do_ssh "find ${ServerPath} -name '*.pyc' -delete && sudo systemctl restart ${ServiceName}"
+Write-Host "  Waiting 6s..." -ForegroundColor Gray
+Start-Sleep -Seconds 6
 
-$result = & ssh -i $SshKey -o StrictHostKeyChecking=no $sshTarget $remoteCmd
+Write-Host "[check] Checking health..." -ForegroundColor Cyan
+$result = cmd /c "ssh -n -T $commonArgs $sshTarget `"curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/`""
+$result = $result -replace '\s',''
 
 if ($result -eq "200") {
     Write-Host "[OK] Deploy successful" -ForegroundColor Green
 } else {
-    Write-Host "[ERR] Server returned $result" -ForegroundColor Red
+    Write-Host "[ERR] Server returned '$result'" -ForegroundColor Red
     exit 1
 }

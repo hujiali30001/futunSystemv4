@@ -521,6 +521,17 @@ export async function sendRiskNotify() {
   return data
 }
 
+export interface DashboardSummary {
+  stats: { active_strategies: number; open_positions: number; today_trades: number; total_trades: number }
+  pnl: { today: number; week: number; today_fees: number; today_net: number }
+  checked_at: string
+}
+
+export async function getDashboardSummary() {
+  const { data } = await api.get<DashboardSummary>('/dashboard/summary')
+  return data
+}
+
 export function tradeToggle(): Promise<TradeToggleResponse> {
   return api.patch('/auth/me/trade-toggle').then((res) => res.data)
 }

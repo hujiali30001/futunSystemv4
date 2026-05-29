@@ -3,6 +3,7 @@ import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { Header } from './components/Header'
 import { AdminLayout } from './pages/admin/AdminLayout'
 
+const DashboardPage = lazy(() => import('./pages/DashboardPage').then(m => ({ default: m.DashboardPage })))
 const LeaderboardPage = lazy(() => import('./pages/LeaderboardPage').then(m => ({ default: m.LeaderboardPage })))
 const LoginPage = lazy(() => import('./pages/LoginPage').then(m => ({ default: m.LoginPage })))
 const RegisterPage = lazy(() => import('./pages/RegisterPage').then(m => ({ default: m.RegisterPage })))
@@ -49,7 +50,8 @@ export default function App() {
           <div className="min-h-screen bg-gray-950 text-gray-100">
             <Header />
             <Routes>
-              <Route path="/" element={<Suspense fallback={<PageLoader />}><LeaderboardPage /></Suspense>} />
+              <Route path="/" element={<Suspense fallback={<PageLoader />}><DashboardPage /></Suspense>} />
+              <Route path="/leaderboard" element={<Suspense fallback={<PageLoader />}><LeaderboardPage /></Suspense>} />
               <Route path="/login" element={<Suspense fallback={<PageLoader />}><LoginPage /></Suspense>} />
               <Route path="/register" element={<Suspense fallback={<PageLoader />}><RegisterPage /></Suspense>} />
               <Route path="/strategies" element={<Suspense fallback={<PageLoader />}><StrategiesPage /></Suspense>} />
