@@ -2,47 +2,46 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from sqlalchemy import text
 
-from app.api.deps import get_db, get_current_user
+from app.api.deps import get_current_user
 from app.risk.daily_loss import DailyLossTracker
 from app.risk.stop_loss import StopLossChecker
 from app.risk.notifier import UserNotifier
 from models import User
 
 router = APIRouter()
-_migrated = False
 
 
-def _ensure_migration(db: Session) -> None:
-    global _migrated
-    if _migrated:
-        return
-    try:
-        db.execute(text("ALTER TABLE strategy_configs ADD COLUMN IF NOT EXISTS max_loss_usdt FLOAT"))
-        db.commit()
-        _migrated = True
-    except Exception:
-        db.rollback()
+def _mk_db():
+    from app.api.deps import _session_factory
+    return _session_factory()
 
 
 @router.get("/status")
 def risk_status(
-    db: Session = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
-    _ensure_migration(db)
     user_id = user["user_id"]
-    user_record = db.query(User).filter(User.id == user_id).first()
 
-    daily_tracker = DailyLossTracker(db)
-    daily = daily_tracker.check(user_id)
-
-    stop_checker = StopLossChecker(db)
-    stop_checks = stop_checker.check(user_id)
+    try:
+        db = _mk_db()
+        try:
+            user_record = db.query(User).filter(User.id == user_id).first()
+            daily = DailyLossTracker(db).check(user_id)
+            stop_checks = StopLossChecker(db).check(user_id)
+        finally:
+            db.close()
+    except Exception:
+        return {
+            "daily_loss": {"today_date": str(datetime.utcnow().date()), "realized_pnl": 0, "limit_usdt": None, "exceeded": False},
+            "stop_loss_alerts": [],
+            "can_open_new_positions": True,
+            "has_alerts": False,
+            "notify_channels": {"email": {"configured": False, "address": None}, "feishu": {"configured": False, "url": None}},
+            "checked_at": datetime.utcnow().isoformat(),
+        }
 
     has_alerts = daily.exceeded or any(c.triggered for c in stop_checks)
-
     email_ok = bool(user_record and user_record.email and user_record.smtp_config_json)
     feishu_ok = bool(user_record and user_record.feishu_webhook_url)
 
@@ -75,43 +74,45 @@ def risk_status(
 
 @router.post("/notify")
 def risk_notify(
-    db: Session = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
-    _ensure_migration(db)
     user_id = user["user_id"]
-    user_record = db.query(User).filter(User.id == user_id).first()
-    if user_record is None:
-        return {"ok": False, "message": "user not found"}
 
-    daily_tracker = DailyLossTracker(db)
-    daily = daily_tracker.check(user_id)
+    try:
+        db = _mk_db()
+        try:
+            user_record = db.query(User).filter(User.id == user_id).first()
+            if user_record is None:
+                return {"ok": False, "message": "user not found"}
+            daily = DailyLossTracker(db).check(user_id)
+            stop_checks = StopLossChecker(db).check(user_id)
+            notifier = UserNotifier(db)
+        finally:
+            db.close()
+    except Exception:
+        return {"ok": False, "message": "internal error"}
 
-    stop_checker = StopLossChecker(db)
-    stop_checks = stop_checker.check(user_id)
-
-    notifier = UserNotifier(db)
     results = []
     if daily.exceeded:
-        body_lines = [
-            f"日期: {daily.date}",
-            f"今日已实现盈亏: {daily.realized_pnl:.2f} USDT",
-            f"亏损上限: {daily.limit} USDT",
-            f"状态: 已超限，新开仓已禁止",
+        body = [
+            f"date: {daily.date}",
+            f"realized_pnl: {daily.realized_pnl:.2f} USDT",
+            f"limit: {daily.limit} USDT",
+            f"status: exceeded",
         ]
-        r = notifier.send_risk_alert(user_record, "日亏损超限", body_lines)
+        r = notifier.send_risk_alert(user_record, "Daily Loss Exceeded", body)
         r["channel"] = "daily_loss"
         results.append(r)
 
     for c in stop_checks:
         if c.triggered:
-            body_lines = [
-                f"策略: {c.strategy_name} (ID={c.strategy_id})",
-                f"止损线: -{c.max_loss_usdt} USDT",
-                f"当前浮亏: {c.current_unrealized_pnl:.2f} USDT",
-                f"状态: 已触发止损，建议立即平仓",
+            body = [
+                f"strategy: {c.strategy_name} (ID={c.strategy_id})",
+                f"stop_loss: -{c.max_loss_usdt} USDT",
+                f"current: {c.current_unrealized_pnl:.2f} USDT",
+                f"status: triggered",
             ]
-            r = notifier.send_risk_alert(user_record, f"策略止损触发 - {c.strategy_name}", body_lines)
+            r = notifier.send_risk_alert(user_record, f"Stop Loss - {c.strategy_name}", body)
             r["channel"] = f"stop_loss:{c.strategy_id}"
             results.append(r)
 
