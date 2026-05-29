@@ -3,8 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import { getLeaderboard, type LeaderboardRow } from '../api'
 import { TradeStatusCard } from '../components/TradeStatusCard'
 
-type Direction = 'spot_futures' | 'futures_spot'
-
 function parseVolume(v: string): number {
   if (!v || v === '--') return 0
   const n = parseFloat(v)
@@ -20,7 +18,6 @@ function parseFundingRate(v: string): number {
 
 export function LeaderboardPage() {
   const [rows, setRows] = useState<LeaderboardRow[]>([])
-  const [direction, setDirection] = useState<Direction>('spot_futures')
   const [loading, setLoading] = useState(true)
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [refreshInterval, setRefreshInterval] = useState(10)
@@ -94,7 +91,7 @@ export function LeaderboardPage() {
   )
 
   const load = () => {
-    getLeaderboard({ direction, page: 1, page_size: 10000 })
+    getLeaderboard({ direction: 'spot_futures', page: 1, page_size: 10000 })
       .then((res) => {
         setRows(res.items)
         setLoading(false)
@@ -105,7 +102,7 @@ export function LeaderboardPage() {
   useEffect(() => {
     setLoading(true)
     load()
-  }, [direction])
+  }, [])
 
   useEffect(() => {
     if (timerRef.current) {
@@ -118,11 +115,11 @@ export function LeaderboardPage() {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current)
     }
-  }, [autoRefresh, refreshInterval, direction])
+  }, [autoRefresh, refreshInterval])
 
   useEffect(() => {
     setPage(1)
-  }, [search, minVolume, minFunding, direction])
+  }, [search, minVolume, minFunding])
 
   useEffect(() => {
     if (!token) return
@@ -137,25 +134,13 @@ export function LeaderboardPage() {
   }, [token])
 
   const handleStart = (row: LeaderboardRow) => {
-    const spot = direction === 'futures_spot' ? row.derivative_exchange : row.spot_exchange
-    const deriv = direction === 'futures_spot' ? row.spot_exchange : row.derivative_exchange
     const params = new URLSearchParams({
       symbol: row.full_symbol,
-      spot_exchange: spot,
-      derivative_exchange: deriv,
+      spot_exchange: row.spot_exchange,
+      derivative_exchange: row.derivative_exchange,
     })
     navigate(`/strategies?${params.toString()}`)
   }
-
-  const switchDir = (dir: Direction) => {
-    setDirection(dir)
-    setPage(1)
-  }
-
-  const tabClass = (dir: Direction) =>
-    direction === dir
-      ? 'border-b-2 border-emerald-400 text-white pb-2 px-1'
-      : 'text-gray-500 pb-2 px-1 hover:text-gray-300'
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-6">
@@ -165,21 +150,6 @@ export function LeaderboardPage() {
           nodeId={userNodeId}
         />
       )}
-
-      <div className="mb-4 flex items-center gap-6">
-        <button
-          onClick={() => switchDir('spot_futures')}
-          className={tabClass('spot_futures')}
-        >
-          现期排行榜
-        </button>
-        <button
-          onClick={() => switchDir('futures_spot')}
-          className={tabClass('futures_spot')}
-        >
-          期现排行榜
-        </button>
-      </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-3 text-sm">
         <button

@@ -12,8 +12,6 @@ import {
   YAxis,
 } from 'recharts'
 
-type Direction = 'spot_futures' | 'futures_spot'
-
 function parseVolume(v: string): number {
   if (!v || v === '--') return 0
   const n = parseFloat(v)
@@ -35,7 +33,6 @@ export function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [tradeEnabled, setTradeEnabled] = useState(false)
   const [nodeId, setNodeId] = useState('')
-  const [direction, setDirection] = useState<Direction>('spot_futures')
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [refreshInterval, setRefreshInterval] = useState(10)
   const [search, setSearch] = useState('')
@@ -63,7 +60,7 @@ export function DashboardPage() {
     const [s, r, lb, me] = await Promise.all([
       getDashboardSummary().catch(() => null),
       getRiskStatus().catch(() => null),
-      getLeaderboard({ direction, page: 1, page_size: 500 }),
+      getLeaderboard({ direction: 'spot_futures', page: 1, page_size: 500 }),
       getMe().catch(() => null),
     ])
     setSummary(s)
@@ -91,20 +88,18 @@ export function DashboardPage() {
       if (vol < parseFloat(minVolume)) return false
     }
     if (minFunding) {
-      const fr = parseFundingRate(r.funding_rate_display) * (direction === 'futures_spot' ? -1 : 1)
+      const fr = parseFundingRate(r.funding_rate_display)
       if (fundingOp === 'gte' ? fr < parseFloat(minFunding) : fr > parseFloat(minFunding)) return false
     }
     return true
   })
 
   const filteredOut = rows.filter(r => {
-    const spread = direction === 'futures_spot' ? r.close_spread_pct : r.open_spread_pct
-    return Math.abs(spread) < 500
+    return Math.abs(r.open_spread_pct) < 500
   })
 
   const finalRows = filtered.length === rows.length ? filteredOut : filtered.filter(r => {
-    const spread = direction === 'futures_spot' ? r.close_spread_pct : r.open_spread_pct
-    return Math.abs(spread) < 500
+    return Math.abs(r.open_spread_pct) < 500
   })
 
   const totalPages = Math.ceil(finalRows.length / pageSize)
@@ -220,14 +215,6 @@ export function DashboardPage() {
       )}
 
       <div className="mb-4 flex flex-wrap items-end gap-3">
-        <div className="flex rounded-lg border border-gray-800 bg-gray-900 p-0.5">
-          {(['spot_futures', 'futures_spot'] as Direction[]).map(d => (
-            <button key={d} onClick={() => { setDirection(d); setPage(1) }}
-              className={`rounded-md px-4 py-1.5 text-xs font-medium ${direction === d ? 'bg-emerald-600 text-white' : 'text-gray-400 hover:text-white'}`}>
-              {d === 'spot_futures' ? '现期' : '期现'}
-            </button>
-          ))}
-        </div>
         <label className="flex items-center gap-1.5 text-xs text-gray-500">
           <input type="checkbox" checked={autoRefresh} onChange={e => setAutoRefresh(e.target.checked)} className="accent-emerald-600" />
           自动刷新
@@ -271,16 +258,12 @@ export function DashboardPage() {
               </thead>
               <tbody>
                 {paginated.map((r, i) => {
-                  const openSpread = direction === 'futures_spot' ? r.close_spread_pct : r.open_spread_pct
-                  const closeSpread = direction === 'futures_spot' ? r.open_spread_pct : r.close_spread_pct
-                  const spreadC = openSpread >= 0 ? 'text-emerald-400' : 'text-red-400'
-                  const closeC = closeSpread >= 0 ? 'text-emerald-300' : 'text-red-300'
                   return (
                     <tr key={r.symbol + i} className={`border-b border-gray-800/50 ${i % 2 === 0 ? 'bg-gray-900/30' : ''} hover:bg-gray-800/50 transition`}>
                       <td className="px-3 py-2.5">
                         <div className="flex gap-2 text-xs font-mono">
-                          <span className={spreadC}>{openSpread.toFixed(2)}%</span>
-                          <span className={closeC}>{closeSpread.toFixed(2)}%</span>
+                          <span className={r.open_spread_pct >= 0 ? 'text-emerald-400' : 'text-red-400'}>{r.open_spread_pct.toFixed(2)}%</span>
+                          <span className={r.close_spread_pct >= 0 ? 'text-emerald-300' : 'text-red-300'}>{r.close_spread_pct.toFixed(2)}%</span>
                         </div>
                       </td>
                       <td className="px-3 py-2.5 font-medium text-gray-200">{r.symbol}</td>
