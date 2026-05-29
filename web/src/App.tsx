@@ -1,20 +1,30 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
-import { LeaderboardPage } from './pages/LeaderboardPage'
-import { LoginPage } from './pages/LoginPage'
-import { RegisterPage } from './pages/RegisterPage'
-import { StrategiesPage } from './pages/StrategiesPage'
-import { TasksPage } from './pages/TasksPage'
-import { PositionsPage } from './pages/PositionsPage'
-import { SettingsPage } from './pages/SettingsPage'
 import { Header } from './components/Header'
-import { AdminLoginPage } from './pages/admin/AdminLoginPage'
 import { AdminLayout } from './pages/admin/AdminLayout'
-import { LimitsPage } from './pages/admin/LimitsPage'
-import { SwitchesPage } from './pages/admin/SwitchesPage'
-import { AnnouncementsPage } from './pages/admin/AnnouncementsPage'
-import { AuditPage } from './pages/admin/AuditPage'
-import { AdminUsersPage } from './pages/admin/UsersPage'
-import { ConfigsPage } from './pages/admin/ConfigsPage'
+
+const LeaderboardPage = lazy(() => import('./pages/LeaderboardPage').then(m => ({ default: m.LeaderboardPage })))
+const LoginPage = lazy(() => import('./pages/LoginPage').then(m => ({ default: m.LoginPage })))
+const RegisterPage = lazy(() => import('./pages/RegisterPage').then(m => ({ default: m.RegisterPage })))
+const StrategiesPage = lazy(() => import('./pages/StrategiesPage').then(m => ({ default: m.StrategiesPage })))
+const TasksPage = lazy(() => import('./pages/TasksPage').then(m => ({ default: m.TasksPage })))
+const PositionsPage = lazy(() => import('./pages/PositionsPage').then(m => ({ default: m.PositionsPage })))
+const SettingsPage = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })))
+const AdminLoginPage = lazy(() => import('./pages/admin/AdminLoginPage').then(m => ({ default: m.AdminLoginPage })))
+const LimitsPage = lazy(() => import('./pages/admin/LimitsPage').then(m => ({ default: m.LimitsPage })))
+const SwitchesPage = lazy(() => import('./pages/admin/SwitchesPage').then(m => ({ default: m.SwitchesPage })))
+const AnnouncementsPage = lazy(() => import('./pages/admin/AnnouncementsPage').then(m => ({ default: m.AnnouncementsPage })))
+const AuditPage = lazy(() => import('./pages/admin/AuditPage').then(m => ({ default: m.AuditPage })))
+const AdminUsersPage = lazy(() => import('./pages/admin/UsersPage').then(m => ({ default: m.AdminUsersPage })))
+const ConfigsPage = lazy(() => import('./pages/admin/ConfigsPage').then(m => ({ default: m.ConfigsPage })))
+
+function PageLoader() {
+  return (
+    <div className="flex items-center justify-center py-20">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-gray-700 border-t-emerald-500" />
+    </div>
+  )
+}
 
 export default function App() {
   return (
@@ -23,14 +33,14 @@ export default function App() {
         <Route path="/admin/*" element={
           <div className="min-h-screen bg-gray-950 text-gray-100">
             <Routes>
-              <Route path="login" element={<AdminLoginPage />} />
+              <Route path="login" element={<Suspense fallback={<PageLoader />}><AdminLoginPage /></Suspense>} />
               <Route element={<AdminLayout />}>
-                <Route path="limits" element={<LimitsPage />} />
-                <Route path="switches" element={<SwitchesPage />} />
-                <Route path="announcements" element={<AnnouncementsPage />} />
-                <Route path="audit" element={<AuditPage />} />
-                <Route path="users" element={<AdminUsersPage />} />
-                <Route path="configs" element={<ConfigsPage />} />
+                <Route path="limits" element={<Suspense fallback={<PageLoader />}><LimitsPage /></Suspense>} />
+                <Route path="switches" element={<Suspense fallback={<PageLoader />}><SwitchesPage /></Suspense>} />
+                <Route path="announcements" element={<Suspense fallback={<PageLoader />}><AnnouncementsPage /></Suspense>} />
+                <Route path="audit" element={<Suspense fallback={<PageLoader />}><AuditPage /></Suspense>} />
+                <Route path="users" element={<Suspense fallback={<PageLoader />}><AdminUsersPage /></Suspense>} />
+                <Route path="configs" element={<Suspense fallback={<PageLoader />}><ConfigsPage /></Suspense>} />
               </Route>
             </Routes>
           </div>
@@ -39,13 +49,13 @@ export default function App() {
           <div className="min-h-screen bg-gray-950 text-gray-100">
             <Header />
             <Routes>
-              <Route path="/" element={<LeaderboardPage />} />
-              <Route path="/login" element={<LoginPage />} />
-              <Route path="/register" element={<RegisterPage />} />
-              <Route path="/strategies" element={<StrategiesPage />} />
-              <Route path="/tasks" element={<TasksPage />} />
-              <Route path="/positions" element={<PositionsPage />} />
-              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/" element={<Suspense fallback={<PageLoader />}><LeaderboardPage /></Suspense>} />
+              <Route path="/login" element={<Suspense fallback={<PageLoader />}><LoginPage /></Suspense>} />
+              <Route path="/register" element={<Suspense fallback={<PageLoader />}><RegisterPage /></Suspense>} />
+              <Route path="/strategies" element={<Suspense fallback={<PageLoader />}><StrategiesPage /></Suspense>} />
+              <Route path="/tasks" element={<Suspense fallback={<PageLoader />}><TasksPage /></Suspense>} />
+              <Route path="/positions" element={<Suspense fallback={<PageLoader />}><PositionsPage /></Suspense>} />
+              <Route path="/settings" element={<Suspense fallback={<PageLoader />}><SettingsPage /></Suspense>} />
             </Routes>
           </div>
         } />
