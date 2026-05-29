@@ -1001,6 +1001,40 @@ class ArbitrageExecutionTaskConsumer:
             return derivative_exchange, spot_exchange
         raise ValueError(f"unsupported task_type: {task.task_type}")
 
+    def _finalize_close_pnl(self, task) -> None:
+        from datetime import datetime as dt
+        from models import FillRecord, PositionSnapshot
+
+        session = self.account_repository.session if self.account_repository else None
+        if session is None:
+            return
+        try:
+            fills = (
+                session.query(FillRecord)
+                .filter(FillRecord.task_id == int(getattr(task, "id", 0)))
+                .all()
+            )
+            total_fee = sum(f.fee_cost or 0 for f in fills)
+            total_fill_cost = sum(f.fill_cost for f in fills)
+            target = float(getattr(task, "target_notional", 0) or 0)
+            realized_pnl = target - total_fill_cost - total_fee if target else None
+
+            snap = PositionSnapshot(
+                task_id=int(getattr(task, "id", 0)),
+                user_id=int(getattr(task, "user_id", 0)),
+                snapshot_type="close",
+                symbol=str(getattr(task, "symbol", "")),
+                spot_exchange=str(getattr(task, "spot_exchange", "")),
+                derivative_exchange=str(getattr(task, "derivative_exchange", "")),
+                realized_pnl=realized_pnl,
+            )
+            session.add(snap)
+            task.realized_pnl = realized_pnl
+            task.total_fee = total_fee
+            session.commit()
+        except Exception:
+            session.rollback()
+
     def _is_user_trading_enabled(self, user_id: int) -> bool:
         try:
             session = self.account_repository.session if self.account_repository else None
@@ -1286,6 +1320,8 @@ class ArbitrageExecutionTaskConsumer:
                     repair_action=repair_plan.action,
                     repair_reason=repair_plan.reason,
                 )
+                if str(getattr(task, "task_type", "")).lower() == "close":
+                    self._finalize_close_pnl(task)
                 return 1
             if execution_status == "SKIPPED":
                 self.task_repository.mark_failed(
