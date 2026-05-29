@@ -1,5 +1,5 @@
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import desc, or_, select, update
 from sqlalchemy.orm import Session
@@ -282,6 +282,36 @@ class TaskRepository:
         self.session.commit()
         self.session.refresh(task)
         return task
+
+    def has_recent_exhausted_cooldown(
+        self,
+        *,
+        user_id: int,
+        symbol: str,
+        spot_exchange: str,
+        derivative_exchange: str,
+        strategy_config_id: int | None,
+        env_mode: str,
+        within_seconds: int = 300,
+    ) -> bool:
+        cutoff = datetime.utcnow() - timedelta(seconds=within_seconds)
+        exists = self.session.scalar(
+            select(ArbitrageTask.id).where(
+                ArbitrageTask.user_id == user_id,
+                ArbitrageTask.symbol == symbol,
+                ArbitrageTask.spot_exchange == spot_exchange,
+                ArbitrageTask.derivative_exchange == derivative_exchange,
+                ArbitrageTask.env_mode == env_mode,
+                ArbitrageTask.auto_recovery_status.in_(("COOLDOWN", "EXHAUSTED")),
+                ArbitrageTask.created_at >= cutoff,
+                (
+                    (ArbitrageTask.strategy_config_id == strategy_config_id)
+                    if strategy_config_id is not None
+                    else True
+                ),
+            ).limit(1)
+        )
+        return exists is not None
 
     def _require_task(self, task_uuid: str) -> ArbitrageTask:
         task = self.get_by_task_uuid(task_uuid)

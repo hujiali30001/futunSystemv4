@@ -1105,7 +1105,11 @@ class ArbitrageExecutionTaskConsumer:
         if not filled_exchanges and len(failed_exchanges) >= 2:
             return "both_legs_failed"
         reason = str(getattr(result, "reason", "") or "").lower()
-        if any(kw in reason for kw in ("insufficient", "balance_not_enough", "insufficientfunds")):
+        failed_errors_text = " ".join(
+            str(e) for e in (getattr(result, "failed_errors", None) or [])
+        ).lower()
+        if any(kw in reason or kw in failed_errors_text
+               for kw in ("insufficient", "balance_not_enough", "insufficientfunds")):
             return "insufficient_funds"
         return None
 
@@ -2028,6 +2032,25 @@ class RedisArbitrageTaskDispatcher:
                                         )
                                     continue
                             try:
+                                if self.task_repository is not None and self.task_repository.has_recent_exhausted_cooldown(
+                                    user_id=int(user_id),
+                                    symbol=str(effective_payload["symbol"]),
+                                    spot_exchange=str(effective_payload["spot_exchange"]),
+                                    derivative_exchange=str(effective_payload["derivative_exchange"]),
+                                    strategy_config_id=int(strategy.id) if strategy is not None else None,
+                                    env_mode=self.env_mode,
+                                ):
+                                    if self.event_router is not None:
+                                        await self.event_router.dispatch(
+                                            _build_arb_dispatcher_task_skipped_event(
+                                                region=self.region,
+                                                payload=effective_payload,
+                                                user_id=user_id,
+                                                skip_reason="prior_task_exhausted",
+                                            )
+                                        )
+                                    self.task_repository.session.rollback()
+                                    continue
                                 task_record = self._create_arbitrage_task(
                                     user_id=user_id,
                                     message_id=str(effective_payload["source_message_id"]),
