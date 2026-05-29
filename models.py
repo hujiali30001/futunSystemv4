@@ -115,7 +115,7 @@ class ArbitrageTask(TimestampMixin, Base):
     task_uuid: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     strategy_config_id: Mapped[int | None] = mapped_column(
-        ForeignKey("strategy_configs.id"),
+        ForeignKey("strategy_configs.id", ondelete="SET NULL"),
         nullable=True,
     )
     buy_account_id: Mapped[int | None] = mapped_column(Integer, nullable=True)

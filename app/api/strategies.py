@@ -138,8 +138,12 @@ def delete_strategy(
     )
     if strategy is None:
         raise HTTPException(status_code=404, detail="Strategy not found")
-    db.delete(strategy)
-    db.commit()
+    try:
+        db.delete(strategy)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="该策略有关联订单记录，无法删除。请先确保无关联订单后再试。")
     return {"ok": True}
 
 
