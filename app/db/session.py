@@ -11,7 +11,7 @@ def build_engine(database_url: str) -> Engine:
             "pool_size": 5,
             "max_overflow": 10,
             "pool_pre_ping": True,
-            "pool_recycle": 300,
+            "pool_recycle": 3600,
             "pool_timeout": 5,
         }
     return create_engine(database_url, future=True, connect_args=connect_args, **pool_kwargs)

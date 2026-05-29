@@ -71,11 +71,14 @@ def create_strategy(
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    sym = body.symbol.strip()
+    if "/" not in sym:
+        sym = sym + "/USDT"
     strategy = StrategyConfig(
         user_id=current_user["user_id"],
         strategy_type="spot_futures",
         name=body.name,
-        symbol_scope_json=[body.symbol],
+        symbol_scope_json=[sym],
         exchange_scope_json=[body.spot_exchange, body.derivative_exchange],
         target_quote_amount=body.target_quote_amount,
         open_spread_bps_threshold=body.open_spread_bps_threshold,

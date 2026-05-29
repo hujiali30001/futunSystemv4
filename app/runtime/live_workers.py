@@ -1837,7 +1837,13 @@ class RedisArbitrageTaskDispatcher:
         for strategy in strategies:
             symbols = list(getattr(strategy, "symbol_scope_json", []) or [])
             exchanges = set(getattr(strategy, "exchange_scope_json", []) or [])
-            if symbols and payload_symbol not in symbols:
+            _symbol_set = set(symbols)
+            for s in list(_symbol_set):
+                if "/" in s:
+                    _symbol_set.add(s.split("/")[0])
+                else:
+                    _symbol_set.add(s + "/USDT")
+            if symbols and payload_symbol not in _symbol_set:
                 continue
             if exchanges and (payload_exchanges - exchanges):
                 continue
