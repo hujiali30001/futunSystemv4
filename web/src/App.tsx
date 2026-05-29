@@ -18,6 +18,7 @@ const AnnouncementsPage = lazy(() => import('./pages/admin/AnnouncementsPage').t
 const AuditPage = lazy(() => import('./pages/admin/AuditPage').then(m => ({ default: m.AuditPage })))
 const AdminUsersPage = lazy(() => import('./pages/admin/UsersPage').then(m => ({ default: m.AdminUsersPage })))
 const ConfigsPage = lazy(() => import('./pages/admin/ConfigsPage').then(m => ({ default: m.ConfigsPage })))
+const OrdersPage = lazy(() => import('./pages/admin/OrdersPage').then(m => ({ default: m.OrdersPage })))
 
 function PageLoader() {
   return (
@@ -42,6 +43,7 @@ export default function App() {
                 <Route path="audit" element={<Suspense fallback={<PageLoader />}><AuditPage /></Suspense>} />
                 <Route path="users" element={<Suspense fallback={<PageLoader />}><AdminUsersPage /></Suspense>} />
                 <Route path="configs" element={<Suspense fallback={<PageLoader />}><ConfigsPage /></Suspense>} />
+                <Route path="orders" element={<Suspense fallback={<PageLoader />}><OrdersPage /></Suspense>} />
               </Route>
             </Routes>
           </div>
