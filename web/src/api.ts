@@ -506,11 +506,18 @@ export interface RiskStatus {
   daily_loss: { today_date: string; realized_pnl: number; limit_usdt: number | null; exceeded: boolean }
   stop_loss_alerts: { strategy_id: number; strategy_name: string; max_loss_usdt: number; current_unrealized_pnl: number; triggered: boolean }[]
   can_open_new_positions: boolean
+  has_alerts: boolean
+  notify_channels: { email: { configured: boolean; address: string | null }; feishu: { configured: boolean; url: string | null } }
   checked_at: string
 }
 
 export async function getRiskStatus() {
   const { data } = await api.get<RiskStatus>('/risk/status')
+  return data
+}
+
+export async function sendRiskNotify() {
+  const { data } = await api.post<{ ok: boolean; sent: number; results: { channel: string; email: string; feishu: string }[] }>('/risk/notify')
   return data
 }
 

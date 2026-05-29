@@ -8,6 +8,7 @@ import {
   getBalances,
   liquidateAssets,
   getRiskStatus,
+  sendRiskNotify,
   type UserSettings,
   type SmtpSettings,
   type BalancesData,
@@ -181,16 +182,38 @@ export function SettingsPage() {
 function RiskTab() {
   const [status, setStatus] = useState<RiskStatus | null>(null)
   const [loading, setLoading] = useState(true)
+  const [notifying, setNotifying] = useState(false)
+  const [notifyResult, setNotifyResult] = useState('')
 
-  useEffect(() => {
+  const reload = () => {
+    setLoading(true)
     getRiskStatus().then(setStatus).catch(() => {}).finally(() => setLoading(false))
-  }, [])
+  }
+
+  useEffect(() => { reload() }, [])
+
+  const handleNotify = async () => {
+    setNotifying(true)
+    try {
+      const r = await sendRiskNotify()
+      setNotifyResult(`已发送 ${r.sent} 条告警通知`)
+    } catch {
+      setNotifyResult('发送失败')
+    } finally {
+      setNotifying(false)
+      setTimeout(() => setNotifyResult(''), 3000)
+    }
+  }
 
   if (loading) return <div className="rounded-lg border border-gray-800 bg-gray-900 p-6 text-gray-500">加载中...</div>
   if (!status) return <div className="rounded-lg border border-gray-800 bg-gray-900 p-6 text-gray-500">无法获取风险状态</div>
 
   return (
     <div className="space-y-4">
+      {notifyResult && (
+        <div className="rounded-lg bg-emerald-900/30 border border-emerald-800 px-4 py-2 text-sm text-emerald-300">{notifyResult}</div>
+      )}
+
       <div className={`rounded-lg border p-4 ${status.can_open_new_positions ? 'border-emerald-800 bg-emerald-900/20' : 'border-red-800 bg-red-900/20'}`}>
         <div className="flex items-center justify-between">
           <span className="text-sm font-medium">交易状态</span>
@@ -204,7 +227,10 @@ function RiskTab() {
       </div>
 
       <div className="rounded-lg border border-gray-800 bg-gray-900 p-4">
-        <h3 className="mb-3 text-sm font-medium text-gray-300">今日盈亏</h3>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-medium text-gray-300">今日盈亏</h3>
+          <button onClick={reload} className="rounded bg-gray-800 px-3 py-1 text-xs text-gray-400 hover:text-white transition">刷新</button>
+        </div>
         <div className="flex items-baseline gap-3">
           <span className={`text-2xl font-bold ${(status.daily_loss.realized_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
             {((status.daily_loss.realized_pnl || 0) >= 0 ? '+' : '')}{(status.daily_loss.realized_pnl || 0).toFixed(2)}
@@ -228,6 +254,38 @@ function RiskTab() {
           </div>
         )}
       </div>
+
+      <div className="rounded-lg border border-gray-800 bg-gray-900 p-4">
+        <h3 className="mb-3 text-sm font-medium text-gray-300">通知渠道</h3>
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-gray-400">📧 邮件</span>
+            {status.notify_channels.email.configured ? (
+              <span className="text-emerald-400">已配置 · {status.notify_channels.email.address}</span>
+            ) : (
+              <span className="text-gray-600">未配置 — 前往「通知设置」</span>
+            )}
+          </div>
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-gray-400">💬 飞书</span>
+            {status.notify_channels.feishu.configured ? (
+              <span className="text-emerald-400">已配置</span>
+            ) : (
+              <span className="text-gray-600">未配置 — 前往「通知设置」</span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {status.has_alerts && (
+        <button
+          onClick={handleNotify}
+          disabled={notifying}
+          className="w-full rounded-lg bg-red-600 px-4 py-3 text-sm font-medium hover:bg-red-500 disabled:opacity-50 transition"
+        >
+          {notifying ? '发送中...' : '📢 发送告警通知'}
+        </button>
+      )}
 
       {status.stop_loss_alerts.length > 0 && (
         <div className="rounded-lg border border-gray-800 bg-gray-900 p-4">
