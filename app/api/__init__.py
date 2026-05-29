@@ -1,3 +1,4 @@
+import asyncio
 import mimetypes
 import os
 from contextlib import asynccontextmanager
@@ -10,7 +11,12 @@ from fastapi.responses import FileResponse
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
+    from app.api.deps import _session_factory
+    from app.risk.scanner import init_scanner
+    scanner = init_scanner(_session_factory)
+    task = asyncio.create_task(scanner.run())
     yield
+    task.cancel()
 
 
 app = FastAPI(title="FuRun API", version="0.1.0", lifespan=lifespan)

@@ -95,9 +95,11 @@ def main():
             sys.exit(1)
 
     log(f"[RESTART] Restarting {SERVICE}...")
-    ssh_exec(f"find {SERVER_PATH} -name '*.pyc' -delete; sudo systemctl restart {SERVICE}", timeout=15)
-    log("  Waiting 6s...")
-    time.sleep(6)
+    ssh_exec(f"sudo systemctl stop {SERVICE}", timeout=30)
+    ssh_exec(f"sudo systemctl reset-failed {SERVICE} 2>/dev/null; find {SERVER_PATH} -name '*.pyc' -delete", timeout=15)
+    ssh_exec(f"sudo systemctl start {SERVICE}", timeout=15)
+    log("  Waiting 8s...")
+    time.sleep(8)
 
     log("[CHECK] curl health...")
     ok = ssh_exec("curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/", timeout=10)
