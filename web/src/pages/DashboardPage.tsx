@@ -285,10 +285,22 @@ export function DashboardPage() {
                       </td>
                       <td className="px-3 py-2.5 font-medium text-gray-200">{r.symbol}</td>
                       <td className="px-3 py-2.5 text-gray-400">{r.spot_exchange} / {r.derivative_exchange}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-gray-300">{r.spot_price}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-gray-400">{r.funding_rate_display}</td>
+                      <td className="px-3 py-2.5 text-right font-mono text-xs text-gray-400">
+                        <span className="text-gray-200">{r.spot_price || '--'}</span>
+                        <span className="text-gray-600 ml-0.5">现</span>
+                        <br />
+                        <span className="text-gray-200">{r.deriv_price || '--'}</span>
+                        <span className="text-gray-600 ml-0.5">期</span>
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono text-gray-300">
+                        {(r.funding_rate_raw * 100).toFixed(4)}%
+                      </td>
                       <td className="px-3 py-2.5 text-right font-mono text-gray-500">{r.index_spread_pct?.toFixed(2) ?? '--'}%</td>
-                      <td className="px-3 py-2.5 text-right text-gray-500">{r.spot_volume}</td>
+                      <td className="px-3 py-2.5 text-right text-gray-500 text-xs">
+                        {r.spot_volume || '--'}<span className="text-gray-600 ml-0.5">现</span>
+                        <br />
+                        {r.deriv_volume || '--'}<span className="text-gray-600 ml-0.5">期</span>
+                      </td>
                       <td className="px-3 py-2.5 text-center">
                         <button onClick={() => navigate(`/strategies?symbol=${r.symbol}&spot=${r.spot_exchange}&deriv=${r.derivative_exchange}`)}
                           className="rounded bg-emerald-800/50 px-2.5 py-1 text-xs text-emerald-400 hover:bg-emerald-700/50 transition">

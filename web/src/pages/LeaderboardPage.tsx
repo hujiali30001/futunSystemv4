@@ -308,21 +308,13 @@ export function LeaderboardPage() {
                     </td>
                     <td className="px-3 py-3 text-right font-mono text-xs text-gray-400">
                       {row.spot_price || '--'}{' '}
-                      <span className="text-gray-600">
-                        ({direction === 'futures_spot' ? '期' : '现'})
-                      </span>
+                      <span className="text-gray-600">现</span>
                       <br />
                       {row.deriv_price || '--'}{' '}
-                      <span className="text-gray-600">
-                        ({direction === 'futures_spot' ? '现' : '期'})
-                      </span>
+                      <span className="text-gray-600">期</span>
                     </td>
                     <td className="px-3 py-3 font-mono text-sm text-gray-300">
-                      {row.funding_rate_display}
-                      <br />
-                      <span className="text-xs text-gray-600">
-                        ({(row.funding_rate_raw * 100).toFixed(4)}%)
-                      </span>
+                      {(row.funding_rate_raw * 100).toFixed(4)}%
                     </td>
                     <td className="px-3 py-3 text-right text-gray-500">
                       {row.index_spread_pct !== 0
