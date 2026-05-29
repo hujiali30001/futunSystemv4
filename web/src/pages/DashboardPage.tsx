@@ -1,7 +1,16 @@
-import { useEffect, useState } from 'react'
-import { getDashboardSummary, getRiskStatus, getLeaderboard, getMe, type DashboardSummary, type RiskStatus, type LeaderboardRow } from '../api'
+import { useCallback, useEffect, useState } from 'react'
+import { getDashboardSummary, getPnlHistory, getRiskStatus, getLeaderboard, getMe, type DashboardSummary, type RiskStatus, type LeaderboardRow } from '../api'
 import { TradeStatusCard } from '../components/TradeStatusCard'
 import { useNavigate } from 'react-router-dom'
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts'
 
 type Direction = 'spot_futures' | 'futures_spot'
 
@@ -35,6 +44,20 @@ export function DashboardPage() {
   const [fundingOp, setFundingOp] = useState<'gte' | 'lte'>('gte')
   const [page, setPage] = useState(1)
   const pageSize = 15
+  const [pnlDays, setPnlDays] = useState(30)
+  const [pnlPoints, setPnlPoints] = useState<{ date: string; cumulative_pnl: number }[]>([])
+  const [totalPnl, setTotalPnl] = useState(0)
+  const [showPnlChart, setShowPnlChart] = useState(false)
+
+  const loadPnl = useCallback(() => {
+    getPnlHistory(pnlDays).then((res) => {
+      setPnlPoints(res.points)
+      setTotalPnl(res.total_realized_pnl)
+      setShowPnlChart(true)
+    }).catch(() => {})
+  }, [pnlDays])
+
+  useEffect(() => { loadPnl() }, [loadPnl])
 
   const loadData = async () => {
     const [s, r, lb, me] = await Promise.all([
@@ -150,6 +173,49 @@ export function DashboardPage() {
           <button onClick={() => navigate('/settings')} className="rounded bg-red-700 px-3 py-1.5 text-xs font-medium hover:bg-red-600 whitespace-nowrap">
             查看详情
           </button>
+        </div>
+      )}
+
+      {showPnlChart && pnlPoints.length > 0 && (
+        <div className="mb-4 rounded-lg border border-gray-800 bg-gray-900 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-gray-300">收益走势</span>
+              <span className={`text-sm font-semibold ${totalPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                累计 {totalPnl >= 0 ? '+' : ''}{totalPnl.toFixed(2)} USDT
+              </span>
+            </div>
+            <div className="flex rounded border border-gray-700 bg-gray-800 p-0.5">
+              {[7, 30, 90].map((d) => (
+                <button
+                  key={d}
+                  onClick={() => setPnlDays(d)}
+                  className={`rounded px-2.5 py-1 text-xs ${pnlDays === d ? 'bg-emerald-600 text-white' : 'text-gray-400 hover:text-white'}`}
+                >
+                  {d}天
+                </button>
+              ))}
+            </div>
+          </div>
+          <ResponsiveContainer width="100%" height={180}>
+            <AreaChart data={pnlPoints} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
+              <defs>
+                <linearGradient id="dpnlColor" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+              <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+              <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false}
+                tickFormatter={(v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(0)}`} width={55} />
+              <Tooltip
+                contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: 6, fontSize: 12 }}
+                formatter={(value: any) => [`${Number(value) >= 0 ? '+' : ''}${Number(value).toFixed(2)} USDT`, '累计盈亏']}
+              />
+              <Area type="monotone" dataKey="cumulative_pnl" stroke="#10b981" strokeWidth={2} fill="url(#dpnlColor)" />
+            </AreaChart>
+          </ResponsiveContainer>
         </div>
       )}
 
