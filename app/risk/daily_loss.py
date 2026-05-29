@@ -30,7 +30,7 @@ class DailyLossTracker:
             .filter(
                 PositionSnapshot.user_id == user_id,
                 PositionSnapshot.snapshot_type.in_(["close", "partial_close"]),
-                PositionSnapshot.closed_at >= datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0),
+                PositionSnapshot.created_at >= datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0),
             )
             .all()
         )

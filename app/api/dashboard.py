@@ -45,42 +45,59 @@ def dashboard_summary(
     )
     today_trades_count = len(today_tasks)
 
-    today_pnl_rows = (
-        db.query(PositionSnapshot)
-        .filter(
-            PositionSnapshot.user_id == user_id,
-            PositionSnapshot.closed_at >= today_start,
-            PositionSnapshot.snapshot_type.in_(["close", "partial_close"]),
+    today_closed_ids = [t.id for t in today_tasks]
+    today_realized_pnl = 0.0
+    if today_closed_ids:
+        today_pnl_rows = (
+            db.query(PositionSnapshot)
+            .filter(
+                PositionSnapshot.user_id == user_id,
+                PositionSnapshot.task_id.in_(today_closed_ids),
+                PositionSnapshot.snapshot_type.in_(["close", "partial_close"]),
+            )
+            .all()
         )
-        .all()
-    )
-    today_realized_pnl = round(sum(float(r.realized_pnl or 0) for r in today_pnl_rows), 2)
+        today_realized_pnl = round(sum(float(r.realized_pnl or 0) for r in today_pnl_rows), 2)
 
-    today_fees = (
-        db.query(FillRecord)
-        .filter(
-            FillRecord.task_uuid.in_(
-                db.query(ArbitrageTask.task_uuid).filter(
-                    ArbitrageTask.user_id == user_id,
-                    ArbitrageTask.finished_at >= today_start,
-                ).subquery()
-            ),
+    today_task_ids = [
+        t.id for t in
+        db.query(ArbitrageTask).filter(
+            ArbitrageTask.user_id == user_id,
+            ArbitrageTask.finished_at >= today_start,
+        ).all()
+    ]
+    today_total_fee = 0.0
+    if today_task_ids:
+        today_fees = (
+            db.query(FillRecord)
+            .filter(FillRecord.task_id.in_(today_task_ids))
+            .all()
         )
-        .all()
-    )
-    today_total_fee = round(sum(float(f.fee_cost or 0) for f in today_fees), 2)
+        today_total_fee = round(sum(float(f.fee_cost or 0) for f in today_fees), 2)
 
     seven_days_ago = datetime.utcnow() - timedelta(days=7)
-    week_pnl_rows = (
-        db.query(PositionSnapshot)
+    week_closed = (
+        db.query(ArbitrageTask)
         .filter(
-            PositionSnapshot.user_id == user_id,
-            PositionSnapshot.closed_at >= seven_days_ago,
-            PositionSnapshot.snapshot_type.in_(["close", "partial_close"]),
+            ArbitrageTask.user_id == user_id,
+            ArbitrageTask.finished_at >= seven_days_ago,
+            ArbitrageTask.status.in_(["CLOSED", "SUCCEEDED"]),
         )
         .all()
     )
-    week_pnl = round(sum(float(r.realized_pnl or 0) for r in week_pnl_rows), 2)
+    week_closed_ids = [t.id for t in week_closed]
+    week_pnl = 0.0
+    if week_closed_ids:
+        week_pnl_rows = (
+            db.query(PositionSnapshot)
+            .filter(
+                PositionSnapshot.user_id == user_id,
+                PositionSnapshot.task_id.in_(week_closed_ids),
+                PositionSnapshot.snapshot_type.in_(["close", "partial_close"]),
+            )
+            .all()
+        )
+        week_pnl = round(sum(float(r.realized_pnl or 0) for r in week_pnl_rows), 2)
 
     total_tasks = (
         db.query(ArbitrageTask)

@@ -95,9 +95,9 @@ def main():
             sys.exit(1)
 
     log(f"[RESTART] Restarting {SERVICE}...")
-    ssh_exec(f"sudo systemctl stop {SERVICE}", timeout=30)
-    ssh_exec(f"sudo systemctl reset-failed {SERVICE} 2>/dev/null; find {SERVER_PATH} -name '*.pyc' -delete", timeout=15)
-    ssh_exec(f"sudo systemctl start {SERVICE}", timeout=15)
+    ssh_exec(f"find {SERVER_PATH} -name '*.pyc' -delete", timeout=20)
+    ssh_exec(f"sudo systemctl stop {SERVICE} &", timeout=10)
+    ssh_exec(f"sleep 3 && sudo systemctl kill {SERVICE} 2>/dev/null; sudo systemctl reset-failed {SERVICE} 2>/dev/null; sudo systemctl start {SERVICE}", timeout=60)
     log("  Waiting 8s...")
     time.sleep(8)
 

@@ -32,12 +32,15 @@ class StopLossChecker:
         )
 
         strategy_ids = {t.strategy_config_id for t in tasks if t.strategy_config_id}
-        strategies = {
-            s.id: s
-            for s in self.db.query(StrategyConfig)
-            .filter(StrategyConfig.id.in_(strategy_ids), StrategyConfig.max_loss_usdt.isnot(None))
+        strategies_list = (
+            self.db.query(StrategyConfig)
+            .filter(StrategyConfig.id.in_(strategy_ids))
             .all()
-        }
+        )
+        strategies = {}
+        for s in strategies_list:
+            if getattr(s, "max_loss_usdt", None) is not None:
+                strategies[s.id] = s
 
         results = []
         for task in tasks:
@@ -47,7 +50,7 @@ class StopLossChecker:
             snapshots = (
                 self.db.query(PositionSnapshot)
                 .filter(
-                    PositionSnapshot.task_uuid == task.task_uuid,
+                    PositionSnapshot.task_id == task.id,
                     PositionSnapshot.snapshot_type == "open",
                 )
                 .order_by(PositionSnapshot.id.desc())

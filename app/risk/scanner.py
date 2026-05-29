@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 from sqlalchemy.orm import Session
@@ -20,11 +21,13 @@ class RiskAutoScanner:
         self._db_factory = db_factory
         self._states: dict[int, _UserAlertState] = {}
         self._scan_interval: int = 60
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="risk-scan")
 
     async def run(self) -> None:
+        loop = asyncio.get_running_loop()
         while True:
             try:
-                await self._scan_once()
+                await loop.run_in_executor(self._executor, self._scan_once)
             except Exception:
                 logger.exception("RiskAutoScanner scan error")
             await asyncio.sleep(self._scan_interval)
@@ -54,12 +57,12 @@ class RiskAutoScanner:
             new_daily = daily.exceeded
             if new_daily and not state.daily_exceeded:
                 body = [
-                    f"日期: {daily.date}",
-                    f"今日已实现盈亏: {daily.realized_pnl:.2f} USDT",
-                    f"亏损上限: {daily.limit} USDT",
-                    f"状态: 已超限，新开仓已禁止",
+                    f"date: {daily.date}",
+                    f"realized_pnl: {daily.realized_pnl:.2f} USDT",
+                    f"limit: {daily.limit} USDT",
+                    f"status: exceeded, new positions blocked",
                 ]
-                notifier.send_risk_alert(user, "日亏损超限", body)
+                notifier.send_risk_alert(user, "Daily Loss Exceeded", body)
                 logger.warning("RiskAutoScanner: daily_loss exceeded for user=%s", user.id)
 
             state.daily_exceeded = new_daily
@@ -70,12 +73,12 @@ class RiskAutoScanner:
                     current_triggered.add(c.strategy_id)
                     if c.strategy_id not in state.stop_triggered:
                         body = [
-                            f"策略: {c.strategy_name} (ID={c.strategy_id})",
-                            f"止损线: -{c.max_loss_usdt} USDT",
-                            f"当前浮亏: {c.current_unrealized_pnl:.2f} USDT",
-                            f"状态: 已触发止损，建议立即平仓",
+                            f"strategy: {c.strategy_name} (ID={c.strategy_id})",
+                            f"stop_loss: -{c.max_loss_usdt} USDT",
+                            f"current_unrealized_pnl: {c.current_unrealized_pnl:.2f} USDT",
+                            f"status: stop-loss triggered",
                         ]
-                        notifier.send_risk_alert(user, f"策略止损触发 - {c.strategy_name}", body)
+                        notifier.send_risk_alert(user, f"Stop Loss - {c.strategy_name}", body)
                         logger.warning("RiskAutoScanner: stop_loss triggered for user=%s strategy=%s", user.id, c.strategy_name)
 
             state.stop_triggered = current_triggered
