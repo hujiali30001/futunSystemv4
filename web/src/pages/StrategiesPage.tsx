@@ -8,6 +8,7 @@ import {
   updateStrategy,
   type Strategy,
 } from '../api'
+import { TierBar } from '../components/TierBar'
 
 type TierRow = { spread_bps: number; ratio: number }
 
@@ -249,11 +250,16 @@ export function StrategiesPage() {
               多级开清仓
             </label>
             {form.tiers && (
-              <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div className="mt-3">
+                <div className="mb-2 rounded border border-gray-800 bg-gray-800/50 p-2 space-y-1">
+                  <TierBar tiers={form.openTiers} color="green" label="开" />
+                  <TierBar tiers={form.closeTiers} color="red" label="清" />
+                </div>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div>
                   <div className="mb-1 flex items-center justify-between">
                     <span className="text-xs text-gray-500">开仓梯度</span>
-                    <button type="button" onClick={() => setForm({ ...form, openTiers: [...form.openTiers, { spread_bps: 200, ratio: 1.0 }] })} className="text-xs text-emerald-400 hover:underline">+ 添加</button>
+                    <button type="button" onClick={() => setForm({ ...form, openTiers: [...form.openTiers, { spread_bps: 100, ratio: 1.0 }] })} className="text-xs text-emerald-400 hover:underline">+ 添加</button>
                   </div>
                   {form.openTiers.map((t, i) => (
                     <div key={i} className="mb-1 flex gap-2">
@@ -281,7 +287,7 @@ export function StrategiesPage() {
                 <div>
                   <div className="mb-1 flex items-center justify-between">
                     <span className="text-xs text-gray-500">清仓梯度</span>
-                    <button type="button" onClick={() => setForm({ ...form, closeTiers: [...form.closeTiers, { spread_bps: 50, ratio: 1.0 }] })} className="text-xs text-emerald-400 hover:underline">+ 添加</button>
+                    <button type="button" onClick={() => setForm({ ...form, closeTiers: [...form.closeTiers, { spread_bps: 30, ratio: 1.0 }] })} className="text-xs text-emerald-400 hover:underline">+ 添加</button>
                   </div>
                   {form.closeTiers.map((t, i) => (
                     <div key={i} className="mb-1 flex gap-2">
@@ -306,6 +312,7 @@ export function StrategiesPage() {
                   ))}
                   <p className="mt-1 text-xs text-gray-600">bps 阈值  ratio 仓位比例(0-1)</p>
                 </div>
+              </div>
               </div>
             )}
           </div>
@@ -345,12 +352,13 @@ export function StrategiesPage() {
                   <span>资金: {s.target_quote_amount} USDT</span>
                   <span>开: {formatBps(s.open_spread_bps_threshold)}</span>
                   <span>清: {formatBps(s.close_spread_bps_threshold)}</span>
-                  {(s.open_tiers_json?.length || 0) > 1 && (
-                    <span className="text-emerald-500">
-                      {s.open_tiers_json.length}级开{(s.close_tiers_json?.length || 0) > 1 ? ` / ${s.close_tiers_json.length}级清` : ''}
-                    </span>
-                  )}
                 </div>
+                {(s.open_tiers_json?.length || 0) > 1 || (s.close_tiers_json?.length || 0) > 1 ? (
+                  <div className="mt-2 space-y-1">
+                    <TierBar tiers={s.open_tiers_json?.length > 1 ? s.open_tiers_json : [{ spread_bps: s.open_spread_bps_threshold, ratio: 1 }]} color="green" label="开" />
+                    <TierBar tiers={s.close_tiers_json?.length > 1 ? s.close_tiers_json : [{ spread_bps: s.close_spread_bps_threshold, ratio: 1 }]} color="red" label="清" />
+                  </div>
+                ) : null}
               </div>
               <div className="flex gap-2">
                 <button
