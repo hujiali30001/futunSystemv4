@@ -1808,10 +1808,13 @@ class RedisArbitrageTaskDispatcher:
         )
 
     @staticmethod
-    def _pick_best_tier(tiers: list | None, spread_bps: float) -> dict | None:
+    def _pick_best_tier(tiers: list | None, spread_bps: float, *, is_close: bool = False) -> dict | None:
         if not tiers:
             return None
-        candidates = [t for t in tiers if float(t.get("spread_bps", 0)) <= spread_bps]
+        if is_close:
+            candidates = [t for t in tiers if spread_bps <= float(t.get("spread_bps", 0))]
+        else:
+            candidates = [t for t in tiers if float(t.get("spread_bps", 0)) <= spread_bps]
         if not candidates:
             return None
         candidates.sort(key=lambda t: float(t.get("spread_bps", 0)), reverse=True)
@@ -1847,6 +1850,8 @@ class RedisArbitrageTaskDispatcher:
                 continue
             if exchanges and (payload_exchanges - exchanges):
                 continue
+            if len(exchanges) >= 2 and len(payload_exchanges) < 2:
+                continue
             if opportunity_type == "OPEN":
                 tiers = getattr(strategy, "open_tiers_json", []) or []
                 if tiers:
@@ -1859,7 +1864,11 @@ class RedisArbitrageTaskDispatcher:
             elif opportunity_type == "CLOSE":
                 tiers = getattr(strategy, "close_tiers_json", []) or []
                 if tiers:
-                    if not RedisArbitrageTaskDispatcher._pick_best_tier(tiers, close_spread_bps):
+                    if not RedisArbitrageTaskDispatcher._pick_best_tier(tiers, close_spread_bps, is_close=True):
+                        continue
+                else:
+                    threshold = float(getattr(strategy, "close_spread_bps_threshold", 0.0) or 0.0)
+                    if close_spread_bps > threshold:
                         continue
             matched.append(strategy)
         return matched
@@ -1875,7 +1884,7 @@ class RedisArbitrageTaskDispatcher:
         else:
             tiers = getattr(strategy, "close_tiers_json", []) or []
             spread_bps = float(payload.get("close_spread_bps", 0.0))
-        tier = RedisArbitrageTaskDispatcher._pick_best_tier(tiers, spread_bps)
+        tier = RedisArbitrageTaskDispatcher._pick_best_tier(tiers, spread_bps, is_close=(task_type == "close"))
         ratio = float(tier["ratio"]) if tier else 1.0
         target_notional = base_amount * ratio
         if max_notional > 0:
