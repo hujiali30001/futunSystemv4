@@ -90,6 +90,18 @@ export function LeaderboardPage() {
     page * displayPageSize,
   )
 
+  const loadTradeStatus = () => {
+    if (!token) return
+    import('axios').then(({ default: axios }) => {
+      axios.get('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } })
+        .then((res: any) => {
+          setTradingEnabled(res.data.is_trading_enabled)
+          setUserNodeId(res.data.node_id || '')
+        })
+        .catch(() => {})
+    })
+  }
+
   const load = () => {
     getLeaderboard({ direction: 'spot_futures', page: 1, page_size: 10000 })
       .then((res) => {
@@ -102,6 +114,7 @@ export function LeaderboardPage() {
   useEffect(() => {
     setLoading(true)
     load()
+    loadTradeStatus()
   }, [])
 
   useEffect(() => {
@@ -110,7 +123,7 @@ export function LeaderboardPage() {
       timerRef.current = null
     }
     if (autoRefresh) {
-      timerRef.current = setInterval(load, refreshInterval * 1000)
+      timerRef.current = setInterval(() => { load(); loadTradeStatus() }, refreshInterval * 1000)
     }
     return () => {
       if (timerRef.current) clearInterval(timerRef.current)
@@ -120,18 +133,6 @@ export function LeaderboardPage() {
   useEffect(() => {
     setPage(1)
   }, [search, minVolume, minFunding])
-
-  useEffect(() => {
-    if (!token) return
-    import('axios').then(({ default: axios }) => {
-      axios.get('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } })
-        .then((res: any) => {
-          setTradingEnabled(res.data.is_trading_enabled)
-          setUserNodeId(res.data.node_id || '')
-        })
-        .catch(() => {})
-    })
-  }, [token])
 
   const handleStart = (row: LeaderboardRow) => {
     const symbol = row.full_symbol.replace('/USDT', '')
@@ -153,6 +154,7 @@ export function LeaderboardPage() {
         <TradeStatusCard
           isTradingEnabled={tradingEnabled}
           nodeId={userNodeId}
+          onToggled={loadTradeStatus}
         />
       )}
 
